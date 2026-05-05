@@ -1,0 +1,28 @@
+{
+  "name": "visionloop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VisionLoop — production-grade SaaS platform for computer vision dataset creation.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter='@visionloop/web' dev",
+    "build": "bun run --filter='*' build",
+    "lint": "bun run --filter='*' lint",
+    "test": "bun run --filter='*' test",
+    "typecheck": "bun run --filter='*' typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json,yaml,yml}\""
+  },
+  "devDependencies": {
+    "prettier": "3.3.3",
+    "typescript": "5.8.3"
+  },
+  "engines": {
+    "bun": ">=1.2.0",
+    "node": ">=20.0.0"
+  },
+  "packageManager": "bun@1.2.0"
+}

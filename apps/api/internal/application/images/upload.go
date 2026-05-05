@@ -1,0 +1,159 @@
+// Package images contains the use-cases backing /v1/images.
+package images
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/visionloop/api/internal/application"
+	"github.com/visionloop/api/internal/domain"
+)
+
+// PresignUpload registers a pending image row, signs an R2 PUT URL, and
+// returns both. The image lands as `uploading`; FinalizeUpload promotes it
+// to `ready` once the client confirms the upload.
+type PresignUpload struct {
+	Images       application.ImageRepository
+	Storage      application.ObjectStore
+	Audit        application.AuditRecorder
+	PresignTTL   time.Duration
+	Clock        application.Clock
+}
+
+type PresignUploadInput struct {
+	Caller      domain.Caller
+	ContentType string
+	ByteSize    int64
+}
+
+type PresignUploadOutput struct {
+	Image  domain.Image
+	Upload application.PresignedURL
+}
+
+func (u PresignUpload) Execute(ctx context.Context, in PresignUploadInput) (PresignUploadOutput, error) {
+	if err := domain.ValidateUploadRequest(in.ContentType, in.ByteSize); err != nil {
+		return PresignUploadOutput{}, err
+	}
+
+	id := uuid.Must(uuid.NewRandom())
+	key := domain.StorageKeyFor(in.Caller.OrgID, id, in.ContentType)
+
+	img, err := u.Images.Create(ctx, domain.Image{
+		ID:          id,
+		OrgID:       in.Caller.OrgID,
+		UploadedBy:  in.Caller.UserID,
+		StorageKey:  key,
+		ContentType: in.ContentType,
+		ByteSize:    in.ByteSize,
+		Status:      domain.ImageUploading,
+	})
+	if err != nil {
+		return PresignUploadOutput{}, fmt.Errorf("persist image: %w", err)
+	}
+
+	signed, err := u.Storage.PresignPut(ctx, key, in.ContentType, in.ByteSize, u.PresignTTL)
+	if err != nil {
+		return PresignUploadOutput{}, fmt.Errorf("presign: %w", err)
+	}
+
+	_ = u.Audit.Record(ctx, application.AuditEntry{
+		OrgID:      &in.Caller.OrgID,
+		ActorID:    &in.Caller.UserID,
+		ActorKind:  "user",
+		Action:     "image.presign",
+		Resource:   "image",
+		ResourceID: &img.ID,
+		Metadata: map[string]any{
+			"content_type": in.ContentType,
+			"byte_size":    in.ByteSize,
+		},
+	})
+
+	return PresignUploadOutput{Image: img, Upload: signed}, nil
+}
+
+// FinalizeUpload reconciles a successful client upload with the database.
+// It re-reads the object from storage to confirm presence and size, then
+// flips the row to `ready`.
+type FinalizeUpload struct {
+	Images  application.ImageRepository
+	Storage application.ObjectStore
+	Audit   application.AuditRecorder
+}
+
+type FinalizeUploadInput struct {
+	Caller  domain.Caller
+	ImageID uuid.UUID
+	Width   int32
+	Height  int32
+	SHA256  string
+}
+
+func (u FinalizeUpload) Execute(ctx context.Context, in FinalizeUploadInput) (domain.Image, error) {
+	pending, err := u.Images.Get(ctx, in.ImageID, in.Caller.OrgID)
+	if err != nil {
+		return domain.Image{}, err
+	}
+	if pending.Status != domain.ImageUploading {
+		return domain.Image{}, fmt.Errorf("%w: image already finalized", domain.ErrConflict)
+	}
+
+	info, err := u.Storage.HeadObject(ctx, pending.StorageKey)
+	if err != nil {
+		return domain.Image{}, fmt.Errorf("head object: %w", err)
+	}
+	if info.ByteSize != pending.ByteSize {
+		return domain.Image{}, fmt.Errorf("%w: byte size mismatch (expected %d, found %d)",
+			domain.ErrInvalidInput, pending.ByteSize, info.ByteSize)
+	}
+
+	final, err := u.Images.Finalize(ctx, in.ImageID, in.Caller.OrgID, info.ETag, in.Width, in.Height, in.SHA256)
+	if err != nil {
+		return domain.Image{}, err
+	}
+
+	_ = u.Audit.Record(ctx, application.AuditEntry{
+		OrgID:      &in.Caller.OrgID,
+		ActorID:    &in.Caller.UserID,
+		ActorKind:  "user",
+		Action:     "image.finalize",
+		Resource:   "image",
+		ResourceID: &final.ID,
+		Metadata: map[string]any{
+			"width":  in.Width,
+			"height": in.Height,
+		},
+	})
+	return final, nil
+}
+
+// ListImages is the read query backing GET /v1/images.
+type ListImages struct {
+	Images application.ImageRepository
+}
+
+type ListImagesInput struct {
+	Caller domain.Caller
+	Status domain.ImageStatus
+	Limit  int32
+	Offset int32
+}
+
+type ListImagesOutput struct {
+	Items []domain.Image
+	Total int64
+}
+
+func (u ListImages) Execute(ctx context.Context, in ListImagesInput) (ListImagesOutput, error) {
+	if in.Limit <= 0 || in.Limit > 200 {
+		in.Limit = 50
+	}
+	items, total, err := u.Images.List(ctx, in.Caller.OrgID, in.Status, in.Limit, in.Offset)
+	if err != nil {
+		return ListImagesOutput{}, err
+	}
+	return ListImagesOutput{Items: items, Total: total}, nil
+}

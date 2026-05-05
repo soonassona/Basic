@@ -1,0 +1,8 @@
+bin/
+api
+*.test
+*.out
+.env
+.env.*
+.golangci.yaml.local
+README.md

@@ -1,0 +1,2 @@
+-- Extensions are intentionally not dropped on rollback (other databases on the
+-- cluster may depend on them).

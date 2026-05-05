@@ -1,0 +1,745 @@
+openapi: 3.1.0
+info:
+  title: VisionLoop API
+  version: 0.2.0
+  summary: Phase 1 + Phase 2 surface — auth, images, jobs (with SSE), annotations.
+  description: |
+    Source of truth: `docs/spec/visionloop-spec.md`. Sections cited inline.
+
+    Auth: Better Auth session cookie (`better-auth.session_token`) or
+    `Authorization: Bearer <token>` (spec §9). All `/v1/*` endpoints require
+    a session and a primary org membership. RBAC (owner/admin/annotator/
+    viewer) is enforced per-handler — viewers are read-only.
+
+    Multi-tenancy: every query scopes by `org_id` resolved from the caller's
+    primary membership. Cross-tenant reads return 404, never 403.
+
+    Errors share one envelope: `{ "error": { "code", "message", "request_id" } }`.
+    Some errors add fields (e.g. `current_version` on 409, `retry_after_ms`
+    on 503 from POST /v1/jobs).
+
+    Internal worker callback (`/internal/jobs/callback`) is intentionally
+    outside `/v1` and is guarded by a shared bearer **plus** a per-job
+    HMAC over the job id (ADR-0004).
+  contact:
+    name: VisionLoop
+    url: https://github.com/visionloop
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: http://localhost:8080
+    description: Local docker-compose
+  - url: https://api.visionloop.example.com
+    description: Production (placeholder)
+
+tags:
+  - name: health
+    description: Liveness and readiness probes (unauthenticated).
+  - name: identity
+    description: Current caller (spec §9).
+  - name: images
+    description: Image upload presign + finalize (spec §8, §9 file validation).
+  - name: jobs
+    description: Async job submission and SSE event stream (spec §11, ADR-0004).
+  - name: annotations
+    description: Annotation reads + optimistic-locked edits (spec §10).
+  - name: internal
+    description: Worker → API callback. Not for browser clients.
+
+security:
+  - sessionCookie: []
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      operationId: getLiveness
+      tags: [health]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, uptime, service]
+                properties:
+                  status: { type: string, const: ok }
+                  uptime: { type: number, description: Seconds since process start. }
+                  service: { type: string, const: visionloop-api }
+
+  /readyz:
+    get:
+      operationId: getReadiness
+      tags: [health]
+      summary: Readiness probe (Postgres ping)
+      security: []
+      responses:
+        '200':
+          description: Postgres reachable.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ready }
+        '503':
+          description: Postgres unreachable.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: degraded }
+                  error: { type: string, const: postgres_unreachable }
+
+  /v1/me:
+    get:
+      operationId: getMe
+      tags: [identity]
+      summary: Current user and primary membership
+      responses:
+        '200':
+          description: Caller resolved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, membership]
+                properties:
+                  user:
+                    type: object
+                    required: [id, email, display_name, email_verified, locale]
+                    properties:
+                      id: { type: string, format: uuid }
+                      email: { type: string, format: email }
+                      display_name: { type: string }
+                      email_verified: { type: boolean }
+                      locale: { type: string, examples: [en, th] }
+                  membership:
+                    type: object
+                    required: [org_id, role]
+                    properties:
+                      org_id: { type: string, format: uuid }
+                      role: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/images:
+    get:
+      operationId: listImages
+      tags: [images]
+      summary: List images for the caller's org
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, format: int32, default: 50, minimum: 1, maximum: 500 }
+        - in: query
+          name: offset
+          schema: { type: integer, format: int32, default: 0, minimum: 0 }
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/ImageStatus' }
+      responses:
+        '200':
+          description: Page of images.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Image' }
+                  total:  { type: integer, format: int64 }
+                  limit:  { type: integer, format: int32 }
+                  offset: { type: integer, format: int32 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/images:presign:
+    post:
+      operationId: presignImageUpload
+      tags: [images]
+      summary: Reserve an image row and return a presigned PUT URL
+      description: |
+        Creates an `images` row in `uploading` state and returns a presigned
+        URL for direct-to-object-store upload (R2 in prod, MinIO locally).
+        50 MB cap and MIME allowlist enforced server-side (spec §9).
+        Forbidden for `viewer` role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content_type, byte_size]
+              properties:
+                content_type:
+                  type: string
+                  examples: [image/png, image/jpeg]
+                byte_size:
+                  type: integer
+                  format: int64
+                  minimum: 1
+      responses:
+        '201':
+          description: Reservation created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [image, upload]
+                properties:
+                  image: { $ref: '#/components/schemas/Image' }
+                  upload:
+                    type: object
+                    required: [url, method, headers, expires_at]
+                    properties:
+                      url: { type: string, format: uri }
+                      method: { type: string, const: PUT }
+                      headers:
+                        type: object
+                        additionalProperties: { type: string }
+                      expires_at:
+                        type: string
+                        format: date-time
+                        description: RFC 3339 UTC seconds (`2006-01-02T15:04:05Z`).
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+
+  /v1/images/{id}/confirm:
+    post:
+      operationId: finalizeImageUpload
+      tags: [images]
+      summary: Finalize an image after the client has uploaded the bytes
+      description: |
+        Promotes the row from `uploading` to `ready` once the client confirms
+        the dimensions (and optional sha256). Forbidden for `viewer`.
+      parameters:
+        - $ref: '#/components/parameters/PathID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [width, height]
+              properties:
+                width:  { type: integer, format: int32, minimum: 1 }
+                height: { type: integer, format: int32, minimum: 1 }
+                sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: Image is now ready.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Reserved for Phase 4 annotation_set version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [image]
+                properties:
+                  image: { $ref: '#/components/schemas/Image' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/jobs:
+    post:
+      operationId: submitJob
+      tags: [jobs]
+      summary: Submit a job
+      description: |
+        Spec §11. Dedup key = SHA-256(org_id, image_id, type, canonical(payload))
+        with a 10-minute window — duplicates return the original job_id and
+        the response carries `Idempotent-Replayed: true`.
+
+        Returns 503 with `JOB_PUBLISH_FAILED` if the row was committed but
+        publishing to RabbitMQ failed; retry is safe within the dedup window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image_id, type]
+              properties:
+                image_id: { type: string, format: uuid }
+                type:     { $ref: '#/components/schemas/SubmittableJobType' }
+                payload:
+                  description: Job-type-specific opaque JSON payload. Canonicalised before dedup.
+                  type: object
+                  additionalProperties: true
+      responses:
+        '202':
+          description: Job accepted (or duplicate replayed).
+          headers:
+            ETag:
+              schema: { type: string }
+              description: '"<job_id>"'
+            Idempotent-Replayed:
+              schema: { type: string, enum: ['true'] }
+              description: Present iff the dedup window matched a prior submission.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JobAccepted'
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Image not found in caller's org.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Row committed but downstream publish failed; retry safe.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds to wait before retrying.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    allOf:
+                      - $ref: '#/components/schemas/ErrorBody'
+                      - type: object
+                        properties:
+                          code: { type: string, const: JOB_PUBLISH_FAILED }
+                          job_id: { type: string, format: uuid }
+                          retry_after_ms: { type: integer }
+
+  /v1/jobs/{id}:
+    get:
+      operationId: getJob
+      tags: [jobs]
+      summary: Read a job
+      description: All authenticated roles, including viewers. Cross-tenant ids return 404.
+      parameters:
+        - $ref: '#/components/parameters/PathID'
+      responses:
+        '200':
+          description: Current job state.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: '"<job_id>"'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/jobs/{id}/events:
+    get:
+      operationId: streamJobEvents
+      tags: [jobs]
+      summary: Subscribe to job state events (Server-Sent Events)
+      description: |
+        ADR-0004. Frames:
+
+          * `event: snapshot` once on connect (suppressed if `Last-Event-ID`
+            already matches the current `snapshot:{state}:{attempt}` id).
+          * `event: state` per transition while connected.
+          * Heartbeat comment frame (`:\n\n`) every 20 seconds.
+          * Server closes the stream after 10 minutes; clients reconnect with
+            `Last-Event-ID`. Multi-replica fan-out is Phase 8 — id scheme is
+            forward-compatible.
+
+        The handler returns 4xx/5xx as plain JSON before switching to
+        `text/event-stream`; once headers are flushed, errors arrive as a
+        terminal `state` frame (state=`failed`).
+      parameters:
+        - $ref: '#/components/parameters/PathID'
+        - in: header
+          name: Last-Event-ID
+          required: false
+          schema: { type: string }
+          description: |
+            Resume token from a previous stream. Format
+            `snapshot:{state}:{attempt}` for the snapshot frame, or
+            `{state}:{updated_at_unix_micros}` for transition frames.
+      responses:
+        '200':
+          description: SSE stream opened.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                examples:
+                  - |
+                    event: snapshot
+                    id: snapshot:pending:0
+                    data: {"id":"…","state":"pending","type":"auto","image_id":"…","attempt":0,"error":""}
+
+                    event: state
+                    id: running:1714900000123456
+                    data: {"id":"…","state":"running","attempt":1,"error":""}
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/annotations/{id}:
+    patch:
+      operationId: patchAnnotation
+      tags: [annotations]
+      summary: Edit an annotation with optimistic locking
+      description: |
+        Spec §10. `If-Match` carries the annotation_set version (RFC 7232
+        strong validator — `W/"…"` weak form is rejected). Stale match
+        returns 409 with `current_version` so the client can render a merge
+        UI. Forbidden for `viewer`.
+      parameters:
+        - $ref: '#/components/parameters/PathID'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                geometry:
+                  description: Replaces the geometry blob (kind-specific JSON).
+                  type: object
+                  additionalProperties: true
+                label_id:
+                  type: [string, "null"]
+                  format: uuid
+                human_accepted:
+                  type: [boolean, "null"]
+      responses:
+        '200':
+          description: Edit applied; new version returned.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: '"<new_version>"'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [annotation, new_version]
+                properties:
+                  annotation:  { $ref: '#/components/schemas/Annotation' }
+                  new_version: { type: integer, format: int64, minimum: 1 }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: If-Match version is stale.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    allOf:
+                      - $ref: '#/components/schemas/ErrorBody'
+                      - type: object
+                        properties:
+                          code: { type: string, const: conflict }
+                          current_version: { type: integer, format: int64 }
+        '412':
+          description: If-Match present but malformed (e.g. weak validator, non-integer).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '428':
+          description: If-Match required but missing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/annotation-sets/{image_id}:
+    get:
+      operationId: getAnnotationSet
+      tags: [annotations]
+      summary: Read the annotation set for an image
+      description: |
+        ETag is the set's integer version, suitable for use as `If-Match` on
+        subsequent PATCH /v1/annotations/:id calls. Honours `If-None-Match`
+        with 304. All authenticated roles, viewers included.
+      parameters:
+        - in: path
+          name: image_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: If-None-Match
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Annotation set with all annotations.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: '"<version>"'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnotationSet' }
+        '304':
+          description: Caller's `If-None-Match` matches the current version.
+          headers:
+            ETag:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /internal/jobs/callback:
+    post:
+      operationId: applyJobCallback
+      tags: [internal]
+      summary: Worker → API job state callback
+      description: |
+        ADR-0004. Authenticated by `Authorization: Bearer <token>` *and*
+        `X-Job-Signature: hex(HMAC-SHA256(secret, X-Job-ID))`. Both checks
+        are constant-time; any failure returns a generic 401. Idempotent —
+        replay returns 200 with `no_change: true`.
+      security:
+        - workerCallback: []
+      parameters:
+        - in: header
+          name: X-Job-ID
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: X-Job-Signature
+          required: true
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state:   { $ref: '#/components/schemas/JobState' }
+                attempt: { type: integer, format: int32, minimum: 0 }
+                error:   { type: string }
+                result:
+                  description: Job-type-specific result blob (e.g. mask key + ai_score).
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Callback applied (or replay).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, state, attempt, no_change]
+                properties:
+                  id:        { type: string, format: uuid }
+                  state:     { $ref: '#/components/schemas/JobState' }
+                  attempt:   { type: integer, format: int32 }
+                  no_change: { type: boolean }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+      description: |
+        Better Auth session cookie. Server-side HMAC-verifies the cookie
+        and resolves the `users.id` (ADR-0003).
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: better-auth-session
+      description: |
+        Same Better Auth session token, sent via `Authorization: Bearer`
+        for non-browser clients.
+    workerCallback:
+      type: http
+      scheme: bearer
+      description: |
+        Worker callback shared bearer (`JOB_CALLBACK_TOKEN`). The handler
+        also requires `X-Job-ID` and `X-Job-Signature` (HMAC-SHA256 of the
+        job id with `JOB_CALLBACK_HMAC_SECRET`). See ADR-0004.
+
+  parameters:
+    PathID:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+    IfMatch:
+      in: header
+      name: If-Match
+      required: true
+      description: |
+        Strong validator — annotation_set version, optionally double-quoted.
+        Weak form (`W/"…"`) is rejected with 412.
+      schema:
+        type: string
+        examples: ['"7"', '7']
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid session.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Caller's role is not allowed for this operation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource does not exist or is in another org.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidInput:
+      description: Bad request body, query, or path parameter.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooLarge:
+      description: Payload exceeds the 50 MB upload cap (spec §9).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: Content-Type not in the MIME allowlist (spec §9).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Role:
+      type: string
+      enum: [owner, admin, annotator, viewer]
+      description: RBAC role on the caller's primary org membership (spec §9).
+
+    ImageStatus:
+      type: string
+      enum: [uploading, ready, errored, archived]
+
+    SubmittableJobType:
+      type: string
+      enum: [auto, box, points, polygon, detect]
+      description: |
+        Closed set accepted by `POST /v1/jobs`. `train` and `export` are
+        valid `JobType` values in the database but are produced by internal
+        flows, not client submissions.
+
+    JobType:
+      type: string
+      enum: [auto, box, points, polygon, detect, train, export]
+
+    JobState:
+      type: string
+      enum: [pending, running, succeeded, failed, cancelled]
+
+    AnnotationKind:
+      type: string
+      enum: [mask, bbox, polygon, points]
+
+    Image:
+      type: object
+      required: [id, org_id, status, storage_key, content_type, byte_size]
+      properties:
+        id:           { type: string, format: uuid }
+        org_id:       { type: string, format: uuid }
+        status:       { $ref: '#/components/schemas/ImageStatus' }
+        storage_key:  { type: string }
+        content_type: { type: string }
+        byte_size:    { type: integer, format: int64 }
+        width:        { type: integer, format: int32 }
+        height:       { type: integer, format: int32 }
+
+    Job:
+      type: object
+      required: [id, org_id, image_id, type, state, attempt, dedup_key]
+      properties:
+        id:         { type: string, format: uuid }
+        org_id:     { type: string, format: uuid }
+        image_id:   { type: string, format: uuid }
+        type:       { $ref: '#/components/schemas/JobType' }
+        state:      { $ref: '#/components/schemas/JobState' }
+        attempt:    { type: integer, format: int32, minimum: 0 }
+        error:      { type: string }
+        dedup_key:  { type: string, description: 'SHA-256 hex over (org_id, image_id, type, canonical(payload)).' }
+        created_at: { type: string, format: date-time }
+
+    JobAccepted:
+      type: object
+      required: [id, state, type, image_id, replayed]
+      properties:
+        id:         { type: string, format: uuid }
+        state:      { $ref: '#/components/schemas/JobState' }
+        type:       { $ref: '#/components/schemas/JobType' }
+        image_id:   { type: string, format: uuid }
+        replayed:   { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    Annotation:
+      type: object
+      required: [id, annotation_set_id, kind, geometry]
+      properties:
+        id:                { type: string, format: uuid }
+        annotation_set_id: { type: string, format: uuid }
+        kind:              { $ref: '#/components/schemas/AnnotationKind' }
+        label_id:
+          type: [string, "null"]
+          format: uuid
+        geometry:
+          description: Kind-specific JSON. Mask geometries reference an R2 key; bbox/polygon/points are inline.
+          type: object
+          additionalProperties: true
+        human_accepted:
+          type: [boolean, "null"]
+
+    AnnotationSet:
+      type: object
+      required: [id, image_id, version, annotations]
+      properties:
+        id:       { type: string, format: uuid }
+        image_id: { type: string, format: uuid }
+        version:  { type: integer, format: int64, minimum: 1 }
+        notes:    { type: string }
+        annotations:
+          type: array
+          items: { $ref: '#/components/schemas/Annotation' }
+
+    ErrorBody:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:       { type: string, examples: [unauthorized, forbidden, not_found, invalid_input, conflict, too_large, unsupported_media_type, JOB_PUBLISH_FAILED, if_match_required, if_match_invalid] }
+        message:    { type: string }
+        request_id: { type: string, description: Echoed `X-Request-ID`. }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { $ref: '#/components/schemas/ErrorBody' }

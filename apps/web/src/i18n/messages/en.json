@@ -1,0 +1,54 @@
+{
+  "marketing": {
+    "title": "VisionLoop",
+    "tagline": "An annotation platform that learns from every correction.",
+    "subtitle": "Upload, segment with AI, review, and the model retrains automatically — closing the loop between data and model performance.",
+    "cta_register": "Get started",
+    "cta_login": "Sign in"
+  },
+  "auth": {
+    "register_title": "Create your VisionLoop account",
+    "register_subtitle": "Spin up a workspace and start labeling in minutes.",
+    "login_title": "Welcome back",
+    "login_subtitle": "Sign in to continue.",
+    "email": "Email",
+    "password": "Password",
+    "name": "Display name",
+    "submit_register": "Create account",
+    "submit_login": "Sign in",
+    "switch_to_login": "Already have an account? Sign in",
+    "switch_to_register": "Need an account? Register",
+    "password_hint": "At least 12 characters.",
+    "google": "Continue with Google",
+    "github": "Continue with GitHub"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "images": "Images",
+    "queue": "Queue",
+    "jobs": "Jobs",
+    "dataset": "Dataset",
+    "models": "Models",
+    "analytics": "Analytics",
+    "settings": "Settings",
+    "logout": "Sign out"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "greeting": "Welcome back, {name}",
+    "kpi_images": "Images",
+    "kpi_annotations": "Annotations",
+    "kpi_acceptance": "Acceptance rate",
+    "kpi_jobs": "Active jobs",
+    "empty_state": "Drop your first image to start the loop."
+  },
+  "images": {
+    "title": "Images",
+    "upload": "Upload images",
+    "drop_zone": "Drop images here or click to browse",
+    "uploading": "Uploading {count, plural, one {# image} other {# images}}",
+    "ready": "Ready",
+    "errored": "Failed",
+    "empty": "No images yet — your library is the start of the data flywheel."
+  }
+}

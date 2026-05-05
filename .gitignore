@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.venv/
+__pycache__/
+*.pyc
+vendor/
+*.egg-info/
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+apps/api/bin/
+apps/api/api
+apps/ai-service/dist/
+
+# Test/coverage
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Pact contracts are CI artifacts: web's vitest pact run regenerates
+# them, and the provider verification consumes them. Phase 8 may add a
+# Pact broker that takes over distribution.
+apps/web/pacts/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+apps/web/.env
+apps/web/.env.local
+apps/api/.env
+apps/ai-service/.env
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+*.swp
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Docker / data volumes
+data/
+models/
+
+# Secrets
+*.pem
+*.key
+!*.example.key
+
+# Generated sqlc output is committed (so the repo builds without sqlc installed).
+# Running `make sqlc` regenerates it; CI verifies it stays in sync.

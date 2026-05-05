@@ -1,0 +1,10 @@
+# VisionLoop — code ownership.
+# Until teams are seeded, the platform team owns every path.
+*                       @visionloop/platform
+
+apps/web/**             @visionloop/frontend @visionloop/platform
+apps/api/**             @visionloop/backend  @visionloop/platform
+apps/ai-service/**      @visionloop/ml       @visionloop/platform
+infra/**                @visionloop/platform
+.github/**              @visionloop/platform
+docs/adr/**             @visionloop/platform

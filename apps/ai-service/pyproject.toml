@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visionloop-ai"
+version = "0.1.0"
+description = "VisionLoop ML inference service (SAM 2.1, YOLOv11)."
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "UNLICENSED" }
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.32.1",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "httpx==0.28.1",
+    "celery[redis]==5.5.0",
+    "structlog==24.4.0",
+    "opentelemetry-api==1.29.0",
+    "opentelemetry-sdk==1.29.0",
+    "opentelemetry-instrumentation-fastapi==0.50b0",
+]
+
+[project.optional-dependencies]
+ml = [
+    # Pulled lazily in Phase 3. Kept out of the Phase 1 image for size.
+    "onnxruntime==1.20.1",
+    "numpy==2.2.1",
+    "pillow==11.0.0",
+    "albumentations==2.0.0",
+]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.24.0",
+    "pytest-cov==6.0.0",
+    "pip-audit==2.7.3",
+    "ruff==0.8.4",
+    "mypy==1.13.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "PL", "RUF"]
+ignore = ["PLR0913"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+ignore_missing_imports = true

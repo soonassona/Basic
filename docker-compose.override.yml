@@ -1,0 +1,18 @@
+# Local override: shift host port mappings off the defaults, since the
+# developer machine may already run Postgres / Redis on standard ports.
+# Container-internal ports stay the same so service-to-service URLs in
+# .env files continue to work.
+
+services:
+  postgres:
+    ports: !override ["55432:5432"]
+  redis:
+    ports: !override ["56379:6379"]
+  rabbitmq:
+    ports: !override
+      - "55672:5672"
+      - "55673:15672"
+  minio:
+    ports: !override
+      - "59000:9000"
+      - "59001:9001"

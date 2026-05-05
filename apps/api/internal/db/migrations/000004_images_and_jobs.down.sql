@@ -1,0 +1,16 @@
+DROP INDEX IF EXISTS idx_model_versions_active;
+DROP TABLE IF EXISTS dataset_snapshots;
+DROP TABLE IF EXISTS model_versions;
+DROP TRIGGER IF EXISTS trg_jobs_updated ON jobs;
+DROP TABLE IF EXISTS jobs;
+DROP TYPE IF EXISTS job_type;
+DROP TYPE IF EXISTS job_state;
+DROP TRIGGER IF EXISTS trg_annotations_updated ON annotations;
+DROP TABLE IF EXISTS annotations;
+DROP TYPE IF EXISTS annotation_kind;
+DROP TRIGGER IF EXISTS trg_annotation_sets_updated ON annotation_sets;
+DROP TABLE IF EXISTS annotation_sets;
+DROP TABLE IF EXISTS labels;
+DROP TRIGGER IF EXISTS trg_images_updated ON images;
+DROP TABLE IF EXISTS images;
+DROP TYPE IF EXISTS image_status;

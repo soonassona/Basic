@@ -1,0 +1,66 @@
+name: E2E
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  signup-and-upload:
+    name: Phase 1 — signup → upload
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.0
+
+      - name: bun install
+        run: bun install --frozen-lockfile
+
+      - name: install playwright browsers
+        run: bun run --cwd apps/web test:e2e:install
+
+      - name: provision env files
+        run: |
+          cp .env.example apps/web/.env.local
+          cp .env.example apps/api/.env
+          cp .env.example apps/ai-service/.env
+          # Use a deterministic shared secret for CI.
+          sed -i 's|replace-with-a-32-byte-random-string|0123456789abcdef0123456789abcdef|g' \
+            apps/web/.env.local apps/api/.env
+
+      - name: docker compose up
+        run: docker compose up -d --build postgres redis rabbitmq minio minio-init api web
+
+      - name: wait for web
+        run: |
+          for i in {1..60}; do
+            if curl -sf http://localhost:3000 >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs web api
+          exit 1
+
+      - name: run playwright
+        env:
+          E2E_NO_SERVER: "1"
+          E2E_BASE_URL: http://localhost:3000
+        run: bun run --cwd apps/web test:e2e
+
+      - name: dump compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color > compose.log
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: compose-logs
+          path: |
+            compose.log
+            apps/web/playwright-report/

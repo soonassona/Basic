@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+@theme {
+  /* VisionLoop dark design tokens — section 6 of the spec. */
+  --color-bg: #0c0d0f;
+  --color-surface: #13151a;
+  --color-border: #252830;
+  --color-border-2: #2e3240;
+  --color-primary: #4a8ff5;
+  --color-success: #3ecf8e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-text: #e4e6ed;
+  --color-muted: #6b7485;
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --text-xs: 0.6875rem; /* 11 */
+  --text-sm: 0.75rem;   /* 12 */
+  --text-base: 0.8125rem; /* 13 */
+  --text-md: 0.875rem;  /* 14 */
+  --text-lg: 1rem;      /* 16 */
+  --text-xl: 1.125rem;  /* 18 */
+  --text-2xl: 1.375rem; /* 22 */
+  --text-3xl: 1.75rem;  /* 28 */
+  --text-4xl: 2.625rem; /* 42 */
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.surface {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 500;
+  font-size: var(--text-md);
+  transition: background-color 120ms;
+}
+
+.btn:hover { background-color: var(--color-border); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+.btn-primary:hover { filter: brightness(1.07); }
+.btn-primary:disabled { opacity: 0.5; }
+
+.input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: var(--text-md);
+}
+.input:focus {
+  border-color: var(--color-primary);
+}
