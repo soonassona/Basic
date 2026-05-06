@@ -48,6 +48,10 @@ apps/ai-service/.env
 !.vscode/extensions.json
 !.vscode/settings.example.json
 *.swp
+.agents
+.codex
+jjn
+.claude/settings.local.json
 
 # Logs
 logs/

@@ -1,0 +1,172 @@
+---
+description: VisionLoop project context, spec, and engineering rules
+globs:
+  - "**/*"
+alwaysApply: true
+---
+# VisionLoop — Agent Context
+
+You are working on **VisionLoop**, a production-grade SaaS platform for 
+creating high-quality computer vision datasets. The platform combines 
+AI-assisted annotation (SAM 2.1 + YOLOv11) with a continuous learning 
+loop that retrains models from human corrections automatically.
+
+---
+
+## Canonical documentation
+
+Read these before making changes that affect behavior:
+
+- **Product specification (sections 1–20):** `docs/spec/visionloop-spec.md`
+- **Phase tracker and exit criteria:** `TODO.md`
+- **Architectural decisions:** `docs/adr/`
+- **API contract:** `docs/api/openapi.yaml`
+- **Human setup and operations:** `README.md`
+
+The spec is the source of truth. If code disagrees with the spec, 
+the spec wins unless an ADR overrides it.
+
+---
+
+## Repository layout
+
+```
+visionloop/
+├── apps/
+│   ├── web/          Next.js 15.3 frontend (Bun workspace)
+│   ├── api/          Go 1.24 API gateway (Gin, sqlc, migrations)
+│   └── ai-service/   Python 3.13 ML service (FastAPI, Celery)
+├── docs/
+│   ├── spec/         VisionLoop specification
+│   ├── adr/          Architecture Decision Records
+│   └── api/          OpenAPI 3.1 spec
+├── infra/            Docker, Helm, Grafana, Terraform
+├── scripts/          retrain.py, eval.py, export_onnx.py
+├── CLAUDE.md         This file
+├── TODO.md           Phase tracker
+└── README.md         Setup and operations
+```
+
+---
+
+## Before starting any task
+
+1. Read `TODO.md` and identify the current phase.
+2. If the task touches **security, auth, tenancy, jobs, annotations, 
+   or observability**, read the relevant section in 
+   `docs/spec/visionloop-spec.md`.
+3. Check `docs/adr/` for prior decisions on the topic.
+4. Reject tasks that target a future phase before the current phase 
+   meets its exit criteria — surface the conflict, do not silently 
+   work ahead.
+5. For non-trivial work, output a plan first and wait for approval 
+   before writing code.
+
+---
+
+## Working agreement
+
+1. **Spec first.** Implement what `docs/spec/visionloop-spec.md` 
+   describes. Defer v2.0 items (CLIP embeddings, Grounding DINO, 
+   YOLO-World, video, 3D) unless explicitly asked.
+
+2. **Minimal diffs.** Change only what the task requires. Match 
+   existing style and abstractions. Do not refactor unrelated code.
+
+3. **Type-safe data access.** Go SQL only through sqlc-generated code. 
+   Raw query strings are prohibited — no exceptions.
+
+4. **Multi-tenancy.** Preserve `org_id` scoping and RBAC on every 
+   query and endpoint. Never leak cross-tenant data in responses, 
+   logs, or error messages.
+
+5. **Tests are exit criteria.** New behavior must include tests 
+   where the spec marks them as exit criteria. CI must stay green.
+
+6. **Update TODO.md.** When an item moves from ⏳ to ✅, update the 
+   tracker in the same pull request as the implementation.
+
+7. **Cite the spec.** In commit messages and PR descriptions, 
+   reference the relevant section of `docs/spec/visionloop-spec.md`.
+
+---
+
+## Non-negotiable rules
+
+These were learned the hard way in v1. Do not repeat them.
+
+- **Better Auth is fully wired.** Do not introduce a parallel auth 
+  system. The `users` table uses `modelName` + `fields` overrides 
+  in `apps/web/src/lib/auth.ts` to map snake_case columns.
+
+- **Optimistic locking is enforced.** All `PATCH` endpoints with 
+  concurrency risk require `If-Match` header and return HTTP 409 
+  with `current_version` on conflict. Schema and handler must ship 
+  in the same PR.
+
+- **Autosave goes to the API.** `localStorage` is for UI preferences 
+  only — never primary state.
+
+- **Keyboard shortcuts are all-or-nothing.** Studio shortcuts 
+  (A R L D Z Shift+Z Esc ←→) ship complete or not at all.
+
+- **Dimension contracts are validated at startup.** Embedding models 
+  must assert their output dimension matches the database column. 
+  Fail fast on mismatch.
+
+- **ONNX export is part of model integration.** CPU inference is a 
+  Phase 3 exit criterion, not a follow-up task.
+
+- **No hardcoded secrets.** Environment variables only. `.env.*` 
+  files are gitignored.
+
+---
+
+## Tech stack (canonical versions)
+
+| Layer | Technology |
+|-------|-----------|
+| Web | Next.js 15.3, React 19.1, TypeScript 5.8 strict, Tailwind 4.1, shadcn/ui, Konva 9.3, Bun 1.2 |
+| Auth | Better Auth 1.1 |
+| API | Go 1.24, Gin 1.10, pgx 5, sqlc 1.27, golang-migrate 4.18 |
+| ML | Python 3.13, FastAPI 0.115, Celery 5.5, PyTorch 2.6, ONNX Runtime 1.20 |
+| Data | PostgreSQL 17 + pgvector 0.8, Redis 8, RabbitMQ 4 |
+| Storage | Cloudflare R2 (production), MinIO (local) |
+| Observability | OpenTelemetry 1.34, Prometheus, Grafana, Jaeger/Honeycomb |
+| Testing | Vitest 2 + Playwright 1.51 + MSW 2 (web), pytest 8 (Python), testcontainers-go (Go), Pact, k6 |
+
+---
+
+## Design system
+
+- **Theme:** dark, data-dense, professional
+- **Background:** `#0c0d0f` · **Surface:** `#13151a` · **Border:** `#252830`
+- **Primary:** `#4a8ff5` · **Success:** `#3ecf8e` · **Warning:** `#f59e0b` · **Danger:** `#ef4444`
+- **Text:** `#e4e6ed` · **Muted:** `#6b7485`
+- **Fonts:** Inter (UI), JetBrains Mono (scores, IDs, code)
+- **Accessibility:** WCAG 2.1 AA — contrast ≥ 4.5:1, focus indicators, keyboard navigation, screen reader labels
+- **i18n:** All user-facing strings via `next-intl`. English (default) + Thai.
+
+Density over whitespace. Flat surfaces. No decorative gradients.
+
+---
+
+## When suggesting code
+
+1. Check `TODO.md` to confirm the task is in the current phase.
+2. Read the relevant spec section for requirements.
+3. Check for an existing ADR; if a new architectural decision is 
+   needed, propose an ADR before writing the code.
+4. Write tests in the same PR as the feature.
+5. Update `TODO.md` when items change status.
+6. Reference spec sections in commit messages 
+   (e.g., `feat(api): PATCH /annotations with If-Match (spec §10)`).
+
+---
+
+## When in doubt
+
+- Cite the relevant section of `docs/spec/visionloop-spec.md`.
+- Surface ambiguity rather than guessing.
+- Prefer the boring, well-tested option over the clever one.
+- Ship the flywheel correctly. Two models. Production-grade.
