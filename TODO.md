@@ -104,6 +104,35 @@ Exit criteria: *"annotator completes review-correct-save workflow."*
 - [ ] Autosave debounced 2000ms, ETag/If-Match conflict resolution UI
 - [ ] Label picker, no localStorage for primary state
 
+### Stage A — scaffold landed (commit c1ca83a)
+
+Foundation for the studio is in place; none of the items above flip to ✅
+until Stage B closes the review-correct-save loop.
+
+- (studio) route group with full-bleed auth-checked layout
+- /studio/[id] page + StudioShell (react-query loader, dynamic Konva import)
+- StudioCanvas — image background + bbox overlays, ResizeObserver fit-to-viewport
+- ToolPicker (5 tools, only "select" wired) + StudioSidebar (annotation list)
+- studio-store (zustand): selectedTool, selectedAnnotationId, setVersion
+- API client: getAnnotationSet, patchAnnotation, ApiClientError.currentVersion
+- next.config.ts webpack alias for Konva's `canvas` Node import
+- 5/5 vitest, 0 TS errors, prod build clean
+
+### Stage B — TODO (pick up here)
+
+1. Tool drawing handlers — bbox first (drag to draw), then point/polygon
+2. Mask overlay PNG composite per label color
+3. Command-pattern undo/redo store (depth 50) — drives Z / Shift+Z
+4. Keyboard shortcuts — all 8 in one batch (A/R/L/D/Z/Shift+Z/Esc/←→),
+   guarded against input focus per spec §10
+5. Autosave debounced 2000ms — useDebouncedEffect → patchAnnotation with
+   If-Match=set.version
+6. 409 conflict resolution UI — 3-way merge panel (server / local / merged)
+7. Label picker dropdown — L shortcut focuses it
+8. Add GET /v1/images/:id with presigned download URL (Stage A uses
+   list+filter and the dev MinIO public bucket)
+9. Playwright E2E: load → edit bbox → autosave → conflict path
+
 ## Phase 5 — Active Learning
 
 Exit criteria: *"queue ranks images by uncertainty score."*
