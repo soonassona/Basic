@@ -9,6 +9,14 @@ const config: NextConfig = {
   experimental: {
     typedRoutes: true,
   },
+  // Konva ships a Node bundle that requires the `canvas` native package.
+  // We only render it on the client (`dynamic(... { ssr: false })`), so
+  // alias `canvas` to false to keep webpack from trying to resolve it.
+  webpack: (cfg) => {
+    cfg.resolve = cfg.resolve ?? {};
+    cfg.resolve.alias = { ...cfg.resolve.alias, canvas: false };
+    return cfg;
+  },
   async headers() {
     return [
       {

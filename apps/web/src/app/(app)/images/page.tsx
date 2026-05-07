@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { useRef, useState } from "react";
 import { api, type ImageRecord, ApiClientError } from "@/lib/api";
 
@@ -139,14 +140,20 @@ function ImagesGrid({ items, emptyLabel }: { items: ImageRecord[]; emptyLabel: s
     <ul className="grid gap-3 md:grid-cols-3 lg:grid-cols-4" data-testid="images-grid">
       {items.map((img) => (
         <li key={img.id} className="surface rounded-md p-3" data-testid="image-card">
-          <div className="font-mono text-xs text-[var(--color-muted)]">{img.id.slice(0, 8)}</div>
-          <div className="mt-1 truncate text-sm">{img.storage_key}</div>
-          <div className="mt-2 flex items-center justify-between text-xs text-[var(--color-muted)]">
-            <span>
-              {img.width && img.height ? `${img.width}×${img.height}` : "—"}
-            </span>
-            <StatusPill status={img.status} />
-          </div>
+          <Link
+            href={`/studio/${img.id}`}
+            className="block"
+            aria-label={`Open ${img.storage_key} in studio`}
+          >
+            <div className="font-mono text-xs text-[var(--color-muted)]">{img.id.slice(0, 8)}</div>
+            <div className="mt-1 truncate text-sm">{img.storage_key}</div>
+            <div className="mt-2 flex items-center justify-between text-xs text-[var(--color-muted)]">
+              <span>
+                {img.width && img.height ? `${img.width}×${img.height}` : "—"}
+              </span>
+              <StatusPill status={img.status} />
+            </div>
+          </Link>
         </li>
       ))}
     </ul>

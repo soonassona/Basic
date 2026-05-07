@@ -16,6 +16,13 @@ export const env = {
   NODE_ENV: optional("NODE_ENV", "development"),
   APP_URL: optional("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
   API_URL: optional("NEXT_PUBLIC_API_URL", "http://localhost:8080"),
+  // Public download base for stored images (MinIO bucket / R2 custom domain).
+  // Studio canvas builds image URLs as `${STORAGE_PUBLIC_URL}/${storage_key}`.
+  // Stage B will swap this for presigned download URLs from the API.
+  STORAGE_PUBLIC_URL: optional(
+    "NEXT_PUBLIC_STORAGE_URL",
+    "http://localhost:9000/visionloop-dev",
+  ),
   BETTER_AUTH_SECRET: optional("BETTER_AUTH_SECRET", ""),
   BETTER_AUTH_URL: optional("BETTER_AUTH_URL", "http://localhost:3000"),
   DATABASE_URL: optional("DATABASE_URL", ""),
