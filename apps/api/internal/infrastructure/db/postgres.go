@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -42,7 +43,9 @@ func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // MigrateUp runs forward migrations from the given filesystem path.
 // `dir` should be an absolute path or relative to the binary's CWD.
 func MigrateUp(databaseURL, dir string) error {
-	m, err := migrate.New("file://"+dir, databaseURL)
+	// golang-migrate's pgx/v5 driver registers under "pgx5", not "postgres".
+	migrateURL := strings.Replace(databaseURL, "postgres://", "pgx5://", 1)
+	m, err := migrate.New("file://"+dir, migrateURL)
 	if err != nil {
 		return fmt.Errorf("open migrate: %w", err)
 	}
