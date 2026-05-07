@@ -254,3 +254,35 @@ func (q *Queries) ListAnnotationsBySet(ctx context.Context, arg ListAnnotationsB
 	}
 	return items, nil
 }
+
+const writeAIResult = `-- name: WriteAIResult :exec
+UPDATE annotations
+SET mask_storage_key = $3,
+    ai_score         = $4,
+    model_used       = $5,
+    updated_at       = now()
+WHERE annotation_set_id = $1
+  AND org_id            = $2
+  AND deleted_at IS NULL
+`
+
+type WriteAIResultParams struct {
+	AnnotationSetID uuid.UUID
+	OrgID           uuid.UUID
+	MaskStorageKey  *string
+	AiScore         *float64
+	ModelUsed       *string
+}
+
+// Writes AI inference fields onto every annotation in a set.
+// Called by the job callback handler when state = succeeded.
+func (q *Queries) WriteAIResult(ctx context.Context, arg WriteAIResultParams) error {
+	_, err := q.db.Exec(ctx, writeAIResult,
+		arg.AnnotationSetID,
+		arg.OrgID,
+		arg.MaskStorageKey,
+		arg.AiScore,
+		arg.ModelUsed,
+	)
+	return err
+}

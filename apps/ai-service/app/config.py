@@ -39,6 +39,16 @@ class Settings(BaseSettings):
 
     model_dir: str = Field(default="/models", alias="MODEL_DIR")
     onnx_providers: str = Field(default="CPUExecutionProvider", alias="ONNX_PROVIDERS")
+    sam_model_id: str = Field(default="sam2.1_hiera_large", alias="SAM_MODEL_ID")
+    sam_model_path: str = Field(
+        default="/models/sam2.1_hiera_large.onnx",
+        alias="SAM_MODEL_PATH",
+    )
+    yolo_model_id: str = Field(default="yolov11x", alias="YOLO_MODEL_ID")
+    yolo_model_path: str = Field(
+        default="/models/yolov11x.onnx",
+        alias="YOLO_MODEL_PATH",
+    )
 
     otlp_endpoint: str = Field(default="", alias="OTEL_EXPORTER_OTLP_ENDPOINT")
     service_name: str = Field(default="visionloop-ai", alias="OTEL_SERVICE_NAME")

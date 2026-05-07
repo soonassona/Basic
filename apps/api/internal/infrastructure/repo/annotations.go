@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/visionloop/api/internal/application"
 	"github.com/visionloop/api/internal/db/sqlc"
 	"github.com/visionloop/api/internal/domain"
 )
@@ -175,6 +176,20 @@ func (r *AnnotationRepo) GetByImage(ctx context.Context, imageID, orgID uuid.UUI
 		out = append(out, ann)
 	}
 	return set, out, nil
+}
+
+// WriteAIResult writes mask_storage_key, ai_score, and model_used onto
+// every annotation in the set. Called by the job callback handler when
+// state = succeeded (spec §5).
+func (r *AnnotationRepo) WriteAIResult(ctx context.Context, in application.AIResultWrite) error {
+	q := sqlc.New(r.pool)
+	return q.WriteAIResult(ctx, sqlc.WriteAIResultParams{
+		AnnotationSetID: in.AnnotationSetID,
+		OrgID:           in.OrgID,
+		MaskStorageKey:  in.MaskStorageKey,
+		AiScore:         in.AiScore,
+		ModelUsed:       in.ModelUsed,
+	})
 }
 
 // silence pgtype import on go vet when the only consumer is via

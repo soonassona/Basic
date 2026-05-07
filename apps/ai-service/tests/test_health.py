@@ -49,7 +49,8 @@ def test_infer_returns_501_with_typed_envelope() -> None:
                 "image_url": "https://example.test/x.png",
             },
         )
-    assert response.status_code == 501
+    assert response.status_code == 200
     body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["phase"] == 3
+    # Phase 3: router now active — auto job returns SAM result via stub backend
+    assert body["model_used"] == "sam2.1_hiera_large"
+    assert body["phase"] == 3

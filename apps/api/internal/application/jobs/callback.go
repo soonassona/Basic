@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -16,10 +17,21 @@ import (
 // returns ErrConflict, which the handler maps to 200 + "no_change" so
 // the worker's retry loop converges without churn.
 type ApplyCallback struct {
-	Jobs   application.JobRepository
-	Hub    application.JobEventHub
-	Audit  application.AuditRecorder
-	Clock  application.Clock
+	Jobs        application.JobRepository
+	Hub         application.JobEventHub
+	Audit       application.AuditRecorder
+	Clock       application.Clock
+	Annotations application.AnnotationRepository
+	AnnotationSets application.AnnotationSetRepository
+}
+
+// workerResult is the subset of the worker result JSON that the
+// callback handler cares about (spec §5 model router output).
+type workerResult struct {
+	MaskStorageKey string  `json:"mask_storage_key"`
+	AiScore        float64 `json:"ai_score"`
+	ModelUsed      string  `json:"model_used"`
+	ImageID        string  `json:"image_id"`
 }
 
 type ApplyCallbackInput struct {
@@ -87,6 +99,32 @@ func (u ApplyCallback) Execute(ctx context.Context, in ApplyCallbackInput) (Appl
 			"attempt": persisted.Attempt,
 		},
 	})
+
+	// Write AI result fields to annotations when the job succeeded.
+	if in.State == domain.JobSucceeded && len(in.Result) > 0 && u.Annotations != nil && u.AnnotationSets != nil {
+		var res workerResult
+		if err := json.Unmarshal(in.Result, &res); err == nil && res.ImageID != "" {
+			imageID, parseErr := uuid.Parse(res.ImageID)
+			if parseErr == nil {
+				set, _, setErr := u.AnnotationSets.GetByImage(ctx, imageID, persisted.OrgID)
+				if setErr == nil {
+					maskKey := fmt.Sprintf("jobs/%s/mask.png", persisted.ID)
+					if res.MaskStorageKey != "" {
+						maskKey = res.MaskStorageKey
+					}
+					score := res.AiScore
+					model := res.ModelUsed
+					_ = u.Annotations.WriteAIResult(ctx, application.AIResultWrite{
+						AnnotationSetID: set.ID,
+						OrgID:           persisted.OrgID,
+						MaskStorageKey:  &maskKey,
+						AiScore:         &score,
+						ModelUsed:       &model,
+					})
+				}
+			}
+		}
+	}
 
 	return ApplyCallbackOutput{Job: persisted}, nil
 }

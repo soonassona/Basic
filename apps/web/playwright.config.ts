@@ -13,7 +13,10 @@ export default defineConfig({
   webServer: process.env.E2E_NO_SERVER
     ? undefined
     : {
-        command: "bun run dev",
+        // Node 25 exposes an incomplete localStorage object in server
+        // runtimes; disable experimental web storage so Next dev overlay
+        // does not crash before Playwright can boot the app.
+        command: "node --no-experimental-webstorage ./node_modules/next/dist/bin/next dev --port 3000",
         url: "http://localhost:3000",
         reuseExistingServer: !process.env.CI,
         timeout: 120 * 1000,

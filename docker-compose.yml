@@ -82,6 +82,11 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./apps/api/.env
+    environment:
+      POSTGRES_URL: postgres://visionloop:visionloop@postgres:5432/visionloop?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://visionloop:visionloop@rabbitmq:5672/
+      S3_ENDPOINT: http://minio:9000
     ports: ["8080:8080"]
     depends_on:
       postgres:
@@ -99,6 +104,8 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./apps/web/.env.local
+    environment:
+      DATABASE_URL: postgres://visionloop:visionloop@postgres:5432/visionloop?sslmode=disable
     ports: ["3000:3000"]
     depends_on:
       - api
@@ -109,6 +116,9 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./apps/ai-service/.env
+    environment:
+      RABBITMQ_URL: amqp://visionloop:visionloop@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/1
     ports: ["8000:8000"]
     depends_on:
       redis:
@@ -124,6 +134,10 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./apps/ai-service/.env
+    environment:
+      RABBITMQ_URL: amqp://visionloop:visionloop@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/1
+      API_CALLBACK_URL: http://api:8080/internal/jobs/callback
     command: ["python", "-m", "app.workers"]
     depends_on:
       rabbitmq:

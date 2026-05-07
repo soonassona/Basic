@@ -20,12 +20,13 @@ type Querier interface {
 	// and used for downstream audit/SSE fan-out). Idempotent guard: refuse
 	// to overwrite an already-terminal state.
 	//
-	// Note on $2::job_state casts: without explicit casts at every reference,
-	// Postgres deduces $2 as job_state from `state = $2` and as text from
-	// the CASE comparisons against literals, then errors with "inconsistent
-	// types deduced for parameter $2" (SQLSTATE 42P08). Casting at every
-	// reference forces a single inferred type for the parameter and lets
-	// Postgres compare enum values to literals via implicit upcast.
+	// Note on the explicit ::job_state casts on every state reference:
+	// without them, Postgres deduces the state parameter as job_state from
+	// the SET assignment and as text from the CASE comparisons against
+	// literals, then errors with "inconsistent types deduced for parameter
+	// $N" (SQLSTATE 42P08). Casting at every reference forces a single
+	// inferred type for the parameter and lets Postgres compare enum values
+	// to literals via implicit upcast.
 	ApplyJobCallback(ctx context.Context, arg ApplyJobCallbackParams) (Job, error)
 	// Returns the new version on success, or no rows on If-Match mismatch.
 	BumpAnnotationSetVersion(ctx context.Context, arg BumpAnnotationSetVersionParams) (int64, error)
@@ -72,6 +73,9 @@ type Querier interface {
 	SoftDeleteImage(ctx context.Context, arg SoftDeleteImageParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	UpdateMembershipRole(ctx context.Context, arg UpdateMembershipRoleParams) (Membership, error)
+	// Writes AI inference fields onto every annotation in a set.
+	// Called by the job callback handler when state = succeeded.
+	WriteAIResult(ctx context.Context, arg WriteAIResultParams) error
 }
 
 var _ Querier = (*Queries)(nil)

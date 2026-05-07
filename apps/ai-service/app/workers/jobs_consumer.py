@@ -25,6 +25,7 @@ import json
 import logging
 import signal
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from kombu import Connection, Consumer, Producer, Queue
@@ -32,7 +33,9 @@ from kombu.message import Message
 
 from ..config import load_settings
 from .api_client import APIClient, CallbackAuth
-from .inference_stub import run_inference
+from .model_router import run_routed_inference
+from .inference_stub import get_sam_model
+from .yolo_stub import get_yolo_model
 from .retry_publisher import open_producer, schedule_retry, should_retry
 
 log = logging.getLogger(__name__)
@@ -53,7 +56,7 @@ def process_envelope(envelope: dict[str, Any], api: APIClient) -> dict[str, Any]
     attempt = int(envelope.get("attempt", 0))
 
     api.post_callback(job_id, "running", attempt=attempt).raise_for_status()
-    result = run_inference(envelope)
+    result = run_routed_inference(envelope)
     api.post_callback(job_id, "succeeded", attempt=attempt, result=result).raise_for_status()
     return result
 
@@ -100,7 +103,7 @@ def handle_failure(
     return "dlq"
 
 
-def _make_handler(api: APIClient, producer: Producer | None):
+def _make_handler(api: APIClient, producer: Producer | None) -> Callable[[Any, Message], None]:
     """Build the kombu callback. On success, ack. On failure, dispatch
     to handle_failure → either republish to jobs.retry (then ack the
     original) or reject without requeue (DLQ via topology DLX)."""
@@ -131,6 +134,10 @@ def run() -> None:
     """Entrypoint. Blocks until SIGTERM/SIGINT."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = load_settings()
+    # Fail fast if either model cannot be initialized; inference reuses
+    # the process singletons created here.
+    get_sam_model(settings=settings)
+    get_yolo_model(settings=settings)
     api = APIClient(
         url=settings.api_callback_url,
         auth=CallbackAuth(

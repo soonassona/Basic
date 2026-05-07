@@ -178,6 +178,10 @@ func (s *stubAnnotations) Patch(_ context.Context, id, orgID uuid.UUID, ifMatch 
 	return s.row, s.version, nil
 }
 
+func (s *stubAnnotations) WriteAIResult(_ context.Context, _ application.AIResultWrite) error {
+	return nil
+}
+
 // stubPublisher records publishes; failWith makes Publish return an error.
 type stubPublisher struct {
 	calls   int

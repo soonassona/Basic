@@ -42,12 +42,13 @@ type ApplyJobCallbackParams struct {
 // and used for downstream audit/SSE fan-out). Idempotent guard: refuse
 // to overwrite an already-terminal state.
 //
-// Note on $2::job_state casts: without explicit casts at every reference,
-// Postgres deduces $2 as job_state from `state = $2` and as text from
-// the CASE comparisons against literals, then errors with "inconsistent
-// types deduced for parameter $2" (SQLSTATE 42P08). Casting at every
-// reference forces a single inferred type for the parameter and lets
-// Postgres compare enum values to literals via implicit upcast.
+// Note on the explicit ::job_state casts on every state reference:
+// without them, Postgres deduces the state parameter as job_state from
+// the SET assignment and as text from the CASE comparisons against
+// literals, then errors with "inconsistent types deduced for parameter
+// $N" (SQLSTATE 42P08). Casting at every reference forces a single
+// inferred type for the parameter and lets Postgres compare enum values
+// to literals via implicit upcast.
 func (q *Queries) ApplyJobCallback(ctx context.Context, arg ApplyJobCallbackParams) (Job, error) {
 	row := q.db.QueryRow(ctx, applyJobCallback,
 		arg.State,

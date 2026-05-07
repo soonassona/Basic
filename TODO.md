@@ -85,12 +85,12 @@ Exit criteria: *"job submitted, processed, status streamed via SSE."*
 
 Exit criteria: *"all job types return masks for test images."*
 
-- [ ] SAM 2.1 (`sam2.1_hiera_large`) loaded as thread-safe singleton
-- [ ] YOLOv11x loaded, used for `auto` and `detect` jobs
-- [ ] Model router: `auto` → YOLO → SAM, `box`/`points` → SAM, `polygon` → manual
-- [ ] ONNX export pipeline (CPU inference fallback)
-- [ ] Worker callback writes mask key + `ai_score` + `model_used` on annotation
-- [ ] Lazy model load for tests; small fixture ONNX in `apps/ai-service/tests/fixtures/`
+- [x] SAM 2.1 (`sam2.1_hiera_large`) loaded as thread-safe singleton
+- [x] YOLOv11x loaded, used for `auto` and `detect` jobs
+- [x] Model router: `auto` → YOLO → SAM, `box`/`points` → SAM, `polygon` → manual
+- [x] ONNX export pipeline (CPU inference fallback)
+- [x] Worker callback writes mask key + `ai_score` + `model_used` on annotation
+- [x] Lazy model load for tests; small fixture ONNX in `apps/ai-service/tests/fixtures/`
 
 ## Phase 4 — Annotation Studio
 

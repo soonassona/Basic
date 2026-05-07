@@ -60,7 +60,7 @@ def test_process_envelope_running_then_succeeded() -> None:
 
     assert [c["state"] for c in rec.calls] == ["running", "succeeded"]
     assert rec.calls[1]["result"] == result
-    assert result["model_used"] == "stub"
+    assert result["model_used"] == "sam2.1_hiera_large"
     assert result["type"] == "auto"
 
 
@@ -73,7 +73,7 @@ def test_process_envelope_inference_failure_raises(monkeypatch: pytest.MonkeyPat
     def boom(_envelope: dict) -> dict:
         raise RuntimeError("model exploded")
 
-    monkeypatch.setattr(jobs_consumer, "run_inference", boom)
+    monkeypatch.setattr(jobs_consumer, "run_routed_inference", boom)
 
     rec = RecordingClient()
     api = make_api(rec)

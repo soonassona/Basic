@@ -127,6 +127,16 @@ type AnnotationSetRepository interface {
 //     `currentVersion` is the new (post-bump) value.
 type AnnotationRepository interface {
 	Patch(ctx context.Context, id, orgID uuid.UUID, ifMatch int64, patch domain.AnnotationPatch) (ann domain.Annotation, currentVersion int64, err error)
+	WriteAIResult(ctx context.Context, in AIResultWrite) error
+}
+
+// AIResultWrite carries the AI inference fields written by a job callback.
+type AIResultWrite struct {
+	AnnotationSetID uuid.UUID
+	OrgID           uuid.UUID
+	MaskStorageKey  *string
+	AiScore         *float64
+	ModelUsed       *string
 }
 
 // AuditRecorder appends to the immutable audit trail.

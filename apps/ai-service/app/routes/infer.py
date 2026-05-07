@@ -1,14 +1,20 @@
-"""Phase 1 placeholder for the inference endpoint.
+"""Inference endpoint — wired in Phase 3 (spec §5 Model Routing Logic).
 
-Returns 501 with a typed envelope so consumers can detect the pending
-implementation without parsing free-form error strings. Phase 3 swaps
-this for the real SAM 2.1 / YOLOv11 router."""
+POST /v1/infer dispatches to the model router:
+  auto    → YOLOv11 → SAM 2.1
+  box     → SAM 2.1
+  points  → SAM 2.1
+  polygon → manual (no AI)
+  detect  → YOLOv11 only
+  default → SAM 2.1
+"""
 
 from __future__ import annotations
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from ..workers.model_router import run_routed_inference
 
 router = APIRouter(tags=["inference"])
 
@@ -19,15 +25,11 @@ class InferenceRequest(BaseModel):
     image_url: str = Field(..., description="Presigned R2 URL the worker can fetch.")
 
 
-@router.post("/infer", status_code=501)
-def infer(_: InferenceRequest) -> JSONResponse:
-    return JSONResponse(
-        status_code=501,
-        content={
-            "error": {
-                "code": "not_implemented",
-                "message": "Inference is wired in Phase 3 (see implementation phases).",
-                "phase": 3,
-            }
-        },
-    )
+@router.post("/infer")
+def infer(req: InferenceRequest) -> dict:
+    envelope = {
+        "job_id": req.job_id,
+        "type": req.job_type,
+        "image_url": req.image_url,
+    }
+    return run_routed_inference(envelope)
