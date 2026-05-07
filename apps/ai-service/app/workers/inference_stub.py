@@ -10,6 +10,7 @@ CI can validate lifecycle/concurrency behavior without large model files.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import threading
 from typing import Any, Callable, Protocol
 
@@ -67,7 +68,6 @@ _BackendFactory = Callable[[Settings], SAMBackend]
 
 
 def _build_default_backend(settings: Settings) -> SAMBackend:
-    import os
     if os.path.exists(settings.sam_model_path):
         from .onnx_backends import OnnxSAMBackend, _parse_providers
         return OnnxSAMBackend(

@@ -16,6 +16,7 @@ transformation:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 import threading
 from typing import Any, Callable, Protocol
 
@@ -73,7 +74,6 @@ _BackendFactory = Callable[[Settings], YOLOBackend]
 
 
 def _build_default_backend(settings: Settings) -> YOLOBackend:
-    import os
     if os.path.exists(settings.yolo_model_path):
         from .onnx_backends import OnnxYOLOBackend, _parse_providers
         return OnnxYOLOBackend(

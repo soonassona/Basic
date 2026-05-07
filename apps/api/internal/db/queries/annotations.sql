@@ -46,13 +46,15 @@ RETURNING id, org_id, annotation_set_id, label_id, kind, geometry,
           human_accepted, created_by, created_at, updated_at;
 
 -- name: WriteAIResult :exec
--- Writes AI inference fields onto every annotation in a set.
--- Called by the job callback handler when state = succeeded.
+-- Writes AI inference fields onto un-reviewed annotations in a set.
+-- Skips rows where human_accepted IS NOT NULL so human corrections are
+-- never overwritten by a later AI inference pass.
 UPDATE annotations
 SET mask_storage_key = $3,
     ai_score         = $4,
     model_used       = $5,
     updated_at       = now()
-WHERE annotation_set_id = $1
-  AND org_id            = $2
-  AND deleted_at IS NULL;
+WHERE annotation_set_id  = $1
+  AND org_id             = $2
+  AND deleted_at         IS NULL
+  AND human_accepted     IS NULL;

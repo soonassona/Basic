@@ -44,7 +44,7 @@ def _parse_providers(providers_str: str) -> list[str]:
 
 
 def _fetch_image(url: str) -> Image.Image:
-    with urllib.request.urlopen(url) as resp:  # noqa: S310
+    with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
         return Image.open(io.BytesIO(resp.read())).convert("RGB")
 
 

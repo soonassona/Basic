@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 
@@ -17,11 +18,11 @@ import (
 // returns ErrConflict, which the handler maps to 200 + "no_change" so
 // the worker's retry loop converges without churn.
 type ApplyCallback struct {
-	Jobs        application.JobRepository
-	Hub         application.JobEventHub
-	Audit       application.AuditRecorder
-	Clock       application.Clock
-	Annotations application.AnnotationRepository
+	Jobs           application.JobRepository
+	Hub            application.JobEventHub
+	Audit          application.AuditRecorder
+	Clock          application.Clock
+	Annotations    application.AnnotationRepository
 	AnnotationSets application.AnnotationSetRepository
 }
 
@@ -114,13 +115,19 @@ func (u ApplyCallback) Execute(ctx context.Context, in ApplyCallbackInput) (Appl
 					}
 					score := res.AiScore
 					model := res.ModelUsed
-					_ = u.Annotations.WriteAIResult(ctx, application.AIResultWrite{
+					if writeErr := u.Annotations.WriteAIResult(ctx, application.AIResultWrite{
 						AnnotationSetID: set.ID,
 						OrgID:           persisted.OrgID,
 						MaskStorageKey:  &maskKey,
 						AiScore:         &score,
 						ModelUsed:       &model,
-					})
+					}); writeErr != nil {
+						slog.WarnContext(ctx, "failed to write AI result to annotations",
+							"job_id", persisted.ID,
+							"annotation_set_id", set.ID,
+							"err", writeErr,
+						)
+					}
 				}
 			}
 		}
