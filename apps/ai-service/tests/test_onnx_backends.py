@@ -7,17 +7,20 @@ and the _build_default_backend routing logic.
 
 from __future__ import annotations
 
+import io
 import os
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
+from PIL import Image as PILImage
 
 from app.config import Settings
 from app.workers.onnx_backends import (
     OnnxSAMBackend,
     OnnxYOLOBackend,
+    _fetch_image,
     _parse_providers,
 )
 from app.workers import inference_stub, yolo_stub
@@ -83,6 +86,44 @@ def test_parse_providers_single() -> None:
 def test_parse_providers_multiple() -> None:
     result = _parse_providers("CUDAExecutionProvider,CPUExecutionProvider")
     assert result == ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+
+# ── _fetch_image ──────────────────────────────────────────────────────────────
+
+def _make_png_bytes() -> bytes:
+    buf = io.BytesIO()
+    PILImage.new("RGB", (8, 8), color=(10, 20, 30)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_fetch_image_uses_30s_timeout() -> None:
+    """Fix #3: _fetch_image must pass timeout=30 to urlopen (prevents indefinite block)."""
+    png = _make_png_bytes()
+    mock_resp = MagicMock()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read.return_value = png
+
+    with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
+        result = _fetch_image("https://example.com/img.png")
+
+    mock_open.assert_called_once_with("https://example.com/img.png", timeout=30)
+    assert result.mode == "RGB"
+
+
+def test_fetch_image_returns_rgb_image() -> None:
+    """_fetch_image converts any image to RGB regardless of source mode."""
+    buf = io.BytesIO()
+    PILImage.new("L", (4, 4)).save(buf, format="PNG")   # grayscale → should become RGB
+    mock_resp = MagicMock()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read.return_value = buf.getvalue()
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        img = _fetch_image("https://example.com/gray.png")
+
+    assert img.mode == "RGB"
 
 
 # ── OnnxSAMBackend ────────────────────────────────────────────────────────────

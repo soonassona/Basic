@@ -3,6 +3,7 @@ package jobs_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -66,6 +67,7 @@ func (f *cbAnnotationSets) GetByImage(_ context.Context, imageID, orgID uuid.UUI
 type cbAnnotations struct {
 	writeCalled bool
 	lastWrite   application.AIResultWrite
+	writeErr    error // if non-nil, WriteAIResult returns this error
 }
 
 func (f *cbAnnotations) Patch(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ int64, _ domain.AnnotationPatch) (domain.Annotation, int64, error) {
@@ -74,7 +76,7 @@ func (f *cbAnnotations) Patch(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ int
 func (f *cbAnnotations) WriteAIResult(_ context.Context, in application.AIResultWrite) error {
 	f.writeCalled = true
 	f.lastWrite = in
-	return nil
+	return f.writeErr
 }
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -167,5 +169,89 @@ func TestApplyCallback_Succeeded_EmptyResult_SkipsAIResult(t *testing.T) {
 	}
 	if anns.writeCalled {
 		t.Fatal("WriteAIResult must not be called when result is empty")
+	}
+}
+
+// TestApplyCallback_WriteAIResult_ErrorDoesNotFailJob verifies fix #1:
+// a WriteAIResult failure is logged but does NOT cause Execute to return
+// an error — the job is still marked succeeded in the database.
+func TestApplyCallback_WriteAIResult_ErrorDoesNotFailJob(t *testing.T) {
+	imgID := uuid.New()
+	orgID := uuid.New()
+	setID := uuid.New()
+
+	repo := &cbJobsRepo{job: domain.Job{ID: uuid.New(), OrgID: orgID, ImageID: &imgID}}
+	anns := &cbAnnotations{writeErr: errors.New("storage unavailable")}
+	sets := &cbAnnotationSets{set: domain.AnnotationSet{ID: setID, ImageID: imgID, OrgID: orgID}}
+
+	uc := newCBUseCase(repo, anns, sets)
+	result := makeResult("jobs/abc/mask.png", "sam2.1_hiera_large", imgID.String(), 0.91)
+
+	out, err := uc.Execute(context.Background(), jobs.ApplyCallbackInput{
+		JobID: repo.job.ID, State: domain.JobSucceeded, Result: result,
+	})
+	if err != nil {
+		t.Fatalf("Execute must not propagate WriteAIResult error, got: %v", err)
+	}
+	if out.Job.State != domain.JobSucceeded {
+		t.Errorf("job state: got %q want %q", out.Job.State, domain.JobSucceeded)
+	}
+	if !anns.writeCalled {
+		t.Fatal("WriteAIResult should still have been attempted")
+	}
+}
+
+// TestApplyCallback_Succeeded_UsesFallbackMaskKey verifies that when the
+// worker result contains no mask_storage_key, the callback synthesises a
+// default key from the job ID instead of leaving it empty.
+func TestApplyCallback_Succeeded_UsesFallbackMaskKey(t *testing.T) {
+	imgID := uuid.New()
+	orgID := uuid.New()
+	setID := uuid.New()
+	jobID := uuid.New()
+
+	repo := &cbJobsRepo{job: domain.Job{ID: jobID, OrgID: orgID, ImageID: &imgID}}
+	anns := &cbAnnotations{}
+	sets := &cbAnnotationSets{set: domain.AnnotationSet{ID: setID, ImageID: imgID, OrgID: orgID}}
+
+	uc := newCBUseCase(repo, anns, sets)
+	// result has no mask_storage_key field → fallback should kick in
+	result := makeResult("", "sam2.1_hiera_large", imgID.String(), 0.75)
+
+	_, err := uc.Execute(context.Background(), jobs.ApplyCallbackInput{
+		JobID: jobID, State: domain.JobSucceeded, Result: result,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !anns.writeCalled {
+		t.Fatal("WriteAIResult should have been called")
+	}
+	wantKey := "jobs/" + jobID.String() + "/mask.png"
+	if *anns.lastWrite.MaskStorageKey != wantKey {
+		t.Errorf("fallback mask key: got %q want %q", *anns.lastWrite.MaskStorageKey, wantKey)
+	}
+}
+
+// TestApplyCallback_Succeeded_AnnotationSetNotFound_SkipsWrite verifies
+// that a missing annotation set (e.g. image deleted mid-job) does not
+// cause Execute to fail — the AI result is silently skipped.
+func TestApplyCallback_Succeeded_AnnotationSetNotFound_SkipsWrite(t *testing.T) {
+	imgID := uuid.New()
+	repo := &cbJobsRepo{job: domain.Job{ID: uuid.New(), OrgID: uuid.New(), ImageID: &imgID}}
+	anns := &cbAnnotations{}
+	sets := &cbAnnotationSets{notFound: true}
+
+	uc := newCBUseCase(repo, anns, sets)
+	result := makeResult("jobs/abc/mask.png", "yolov11x", imgID.String(), 0.6)
+
+	_, err := uc.Execute(context.Background(), jobs.ApplyCallbackInput{
+		JobID: repo.job.ID, State: domain.JobSucceeded, Result: result,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if anns.writeCalled {
+		t.Fatal("WriteAIResult must not be called when annotation set is not found")
 	}
 }
