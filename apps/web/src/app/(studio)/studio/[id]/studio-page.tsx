@@ -18,10 +18,24 @@ export function StudioPage({ imageId }: { imageId: string }) {
     staleTime: 30_000,
   });
 
-  const image: ImageRecord | undefined = useMemo(
-    () => list.data?.items.find((i) => i.id === imageId),
-    [list.data, imageId],
-  );
+  // Compute image + prev/next siblings from the list. ←/→ shortcuts navigate
+  // by index; null means "edge of list" and disables the shortcut.
+  const { image, prevImageId, nextImageId } = useMemo(() => {
+    const items = list.data?.items ?? [];
+    const idx = items.findIndex((i) => i.id === imageId);
+    if (idx < 0) {
+      return {
+        image: undefined as ImageRecord | undefined,
+        prevImageId: null as string | null,
+        nextImageId: null as string | null,
+      };
+    }
+    return {
+      image: items[idx],
+      prevImageId: idx > 0 ? items[idx - 1].id : null,
+      nextImageId: idx < items.length - 1 ? items[idx + 1].id : null,
+    };
+  }, [list.data, imageId]);
 
   if (list.isLoading) {
     return (
@@ -46,5 +60,12 @@ export function StudioPage({ imageId }: { imageId: string }) {
   }
 
   const imageUrl = `${env.STORAGE_PUBLIC_URL}/${image.storage_key}`;
-  return <StudioShell image={image} imageUrl={imageUrl} />;
+  return (
+    <StudioShell
+      image={image}
+      imageUrl={imageUrl}
+      prevImageId={prevImageId}
+      nextImageId={nextImageId}
+    />
+  );
 }

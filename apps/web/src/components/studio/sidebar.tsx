@@ -3,11 +3,22 @@
 // Studio right rail — annotation list + label picker placeholder + history
 // controls. Reads annotations from the studio buffer (the canvas's source of
 // truth), so a freshly drawn bbox shows up immediately without a server
-// roundtrip. Slice B2 wires keyboard A/R/L/D shortcuts to these same actions.
+// roundtrip. Keyboard A/R/L/D shortcuts (spec §10) target the same actions
+// via the studio store.
+import type { RefObject } from "react";
+
 import type { Annotation } from "@/lib/api";
 import { studioSelectors, useStudio } from "@/lib/studio-store";
 
-export function StudioSidebar({ setId, setVersion }: { setId: string; setVersion: number }) {
+export function StudioSidebar({
+  setId,
+  setVersion,
+  labelPickerRef,
+}: {
+  setId: string;
+  setVersion: number;
+  labelPickerRef?: RefObject<HTMLButtonElement | null>;
+}) {
   const annotations = useStudio(studioSelectors.bufferList);
   const selectedId = useStudio((s) => s.selectedAnnotationId);
   const select = useStudio((s) => s.selectAnnotation);
@@ -87,14 +98,18 @@ export function StudioSidebar({ setId, setVersion }: { setId: string; setVersion
       </ul>
 
       <footer className="border-t border-[var(--color-border-2)] p-3">
-        <div className="text-xs uppercase text-[var(--color-muted)]">Label</div>
+        <div className="text-xs uppercase text-[var(--color-muted)]">
+          Label <kbd className="font-mono text-[10px] opacity-70">L</kbd>
+        </div>
         <button
+          ref={labelPickerRef}
           type="button"
-          disabled
-          aria-label="Label picker (Stage B4)"
-          className="mt-2 w-full rounded-sm border border-[var(--color-border-2)] px-2 py-1.5 text-left text-sm text-[var(--color-muted)]"
+          aria-label="Label picker"
+          data-testid="label-picker-button"
+          className="mt-2 w-full rounded-sm border border-[var(--color-border-2)] px-2 py-1.5 text-left text-sm text-[var(--color-muted)] focus:border-[var(--color-primary)] focus:outline-none"
         >
-          {/* TODO Slice B4: wire label dropdown + L shortcut */}
+          {/* TODO Slice B4: wire label dropdown options. The L shortcut
+              already focuses this button via labelPickerRef. */}
           Pick a label…
         </button>
       </footer>
