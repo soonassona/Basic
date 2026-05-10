@@ -139,6 +139,12 @@ type AnnotationRepository interface {
 	WriteAIResult(ctx context.Context, in AIResultWrite) error
 }
 
+// LabelRepository serves the studio's label-picker source. Read-only
+// surface for now; CRUD ships when the admin label-management UI lands.
+type LabelRepository interface {
+	ListByOrg(ctx context.Context, orgID uuid.UUID) ([]domain.Label, error)
+}
+
 // AIResultWrite carries the AI inference fields written by a job callback.
 type AIResultWrite struct {
 	AnnotationSetID uuid.UUID

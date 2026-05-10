@@ -9,6 +9,7 @@ import type { RefObject } from "react";
 
 import type { Annotation } from "@/lib/api";
 import { studioSelectors, useStudio } from "@/lib/studio-store";
+import { LabelPicker } from "./label-picker";
 
 export function StudioSidebar({
   setId,
@@ -17,7 +18,7 @@ export function StudioSidebar({
 }: {
   setId: string;
   setVersion: number;
-  labelPickerRef?: RefObject<HTMLButtonElement | null>;
+  labelPickerRef?: RefObject<HTMLSelectElement | null>;
 }) {
   const annotations = useStudio(studioSelectors.bufferList);
   const selectedId = useStudio((s) => s.selectedAnnotationId);
@@ -128,17 +129,9 @@ export function StudioSidebar({
         <div className="text-xs uppercase text-[var(--color-muted)]">
           Label <kbd className="font-mono text-[10px] opacity-70">L</kbd>
         </div>
-        <button
-          ref={labelPickerRef}
-          type="button"
-          aria-label="Label picker"
-          data-testid="label-picker-button"
-          className="mt-2 w-full rounded-sm border border-[var(--color-border-2)] px-2 py-1.5 text-left text-sm text-[var(--color-muted)] focus:border-[var(--color-primary)] focus:outline-none"
-        >
-          {/* TODO Slice B4: wire label dropdown options. The L shortcut
-              already focuses this button via labelPickerRef. */}
-          Pick a label…
-        </button>
+        <div className="mt-2">
+          <LabelPicker ref={labelPickerRef} />
+        </div>
       </footer>
     </aside>
   );

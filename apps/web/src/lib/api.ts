@@ -91,6 +91,16 @@ export type PresignResponse = {
   };
 };
 
+// ── Labels (Phase 4 spec §10) ────────────────────────────────────────────────
+
+export type Label = {
+  id: string;
+  name: string;
+  color: string;        // 7-char hex like "#4a8ff5"
+  description?: string;
+  created_at: string;
+};
+
 // ── Annotations (Phase 4 spec §10) ───────────────────────────────────────────
 
 export type AnnotationKind = "bbox" | "polygon" | "point" | "mask";
@@ -177,4 +187,8 @@ export const api = {
       method: "DELETE",
       headers: { "If-Match": String(ifMatch) },
     }),
+
+  /** GET /v1/labels — org-scoped picker source. Cached aggressively at the
+   * react-query layer; labels rarely change during a session. */
+  listLabels: () => request<{ items: Label[] }>("/v1/labels"),
 };

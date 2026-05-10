@@ -39,6 +39,24 @@ describe("annotation client (Phase 4 spec §10)", () => {
   const imageId = "00000000-0000-0000-0000-000000000aaa";
   const annId = "00000000-0000-0000-0000-000000000bbb";
 
+  it("listLabels returns the org's label catalog", async () => {
+    server.use(
+      http.get(`${API}/v1/labels`, () =>
+        HttpResponse.json({
+          items: [
+            { id: "lbl-1", name: "car", color: "#4a8ff5", created_at: "2026-05-01T00:00:00Z" },
+            { id: "lbl-2", name: "person", color: "#3ecf8e", created_at: "2026-05-01T00:00:00Z" },
+          ],
+        }),
+      ),
+    );
+
+    const out = await api.listLabels();
+    expect(out.items).toHaveLength(2);
+    expect(out.items[0].name).toBe("car");
+    expect(out.items[1].color).toBe("#3ecf8e");
+  });
+
   it("getAnnotationSet returns the set with version", async () => {
     server.use(
       http.get(`${API}/v1/annotation-sets/${imageId}`, () =>

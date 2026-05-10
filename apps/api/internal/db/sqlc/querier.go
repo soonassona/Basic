@@ -75,6 +75,14 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	ListAnnotationsBySet(ctx context.Context, arg ListAnnotationsBySetParams) ([]ListAnnotationsBySetRow, error)
 	ListImages(ctx context.Context, arg ListImagesParams) ([]Image, error)
+	// Label catalog (spec §10 — picker source). Per-org, soft-archive via
+	// the `archived` boolean. The studio reads this list to populate its
+	// label dropdown; bootstrap data is currently inserted via SQL until a
+	// CRUD admin surface lands.
+	// Returns all non-archived labels for an org, alphabetised by name so
+	// the picker has a stable order. ID, name, color are everything the
+	// studio renders today; description ships for future tooltips.
+	ListLabelsByOrg(ctx context.Context, orgID uuid.UUID) ([]Label, error)
 	ListMembershipsForUser(ctx context.Context, userID uuid.UUID) ([]ListMembershipsForUserRow, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	MarkJobErrored(ctx context.Context, arg MarkJobErroredParams) error

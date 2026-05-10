@@ -91,6 +91,7 @@ func main() {
 		JobPublisher: jobPublisher,
 		AnnotationsRepo:    repo.NewAnnotationRepo(pool),
 		AnnotationSetsRepo: repo.NewAnnotationRepo(pool),
+		LabelsRepo:         repo.NewLabelRepo(pool),
 		JobEvents:             jobEvents,
 		JobCallbackToken:      cfg.JobCallbackToken,
 		JobCallbackHMACSecret: cfg.JobCallbackHMACSecret,

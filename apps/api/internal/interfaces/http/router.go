@@ -15,6 +15,7 @@ import (
 	"github.com/visionloop/api/internal/application/annotations"
 	"github.com/visionloop/api/internal/application/images"
 	"github.com/visionloop/api/internal/application/jobs"
+	"github.com/visionloop/api/internal/application/labels"
 	"github.com/visionloop/api/internal/domain"
 )
 
@@ -33,6 +34,7 @@ type RouterDeps struct {
 	JobEvents             application.JobEventHub
 	AnnotationsRepo       application.AnnotationRepository
 	AnnotationSetsRepo    application.AnnotationSetRepository
+	LabelsRepo            application.LabelRepository
 	Storage               application.ObjectStore
 	Audit                 application.AuditRecorder
 	WebOrigin             string
@@ -106,6 +108,13 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		GetSet: annotations.GetAnnotationSet{Sets: d.AnnotationSetsRepo},
 	}
 
+	var labelHandlers *LabelHandlers
+	if d.LabelsRepo != nil {
+		labelHandlers = &LabelHandlers{
+			List: labels.ListLabels{Labels: d.LabelsRepo},
+		}
+	}
+
 	v1 := r.Group("/v1")
 	v1.Use(AuthRequired(d.Sessions, d.Users))
 	{
@@ -142,6 +151,11 @@ func NewRouter(d RouterDeps) *gin.Engine {
 			RequireRole(domain.RoleOwner, domain.RoleAdmin, domain.RoleAnnotator),
 			annHandlers.DeleteAnnotation)
 		v1.GET("/annotation-sets/:image_id", annHandlers.GetAnnotationSet)
+
+		// Label catalog (spec §10) — read-only for the studio's picker.
+		if labelHandlers != nil {
+			v1.GET("/labels", labelHandlers.ListLabels)
+		}
 	}
 
 	// Internal worker callback. NOT under v1 (no session auth) — guarded

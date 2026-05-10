@@ -48,9 +48,9 @@ export function StudioShell({
   const seedBuffer = useStudio((s) => s.seedBuffer);
   const reset = useStudio((s) => s.reset);
 
-  // Shared ref so the L shortcut can focus the label picker button living
-  // in the sidebar.
-  const labelPickerRef = useRef<HTMLButtonElement | null>(null);
+  // Shared ref so the L shortcut can focus the label picker (a <select>)
+  // living in the sidebar.
+  const labelPickerRef = useRef<HTMLSelectElement | null>(null);
 
   useEffect(() => {
     setImage(image.id);
