@@ -164,4 +164,37 @@ describe("studio-store: selectors", () => {
     expect(list).toHaveLength(3);
     expect(list.map((a) => a.id).sort()).toEqual(["a", "b", "c"]);
   });
+
+  it("dirtyIds is empty after seedBuffer, populated after update", () => {
+    const a = ann("a", 0, 0);
+    useStudio.getState().seedBuffer([a]);
+    expect(studioSelectors.dirtyIds(useStudio.getState())).toEqual([]);
+
+    const after = ann("a", 5, 5);
+    useStudio.getState().applyCommand(updateCmd("a", a, after));
+    expect(studioSelectors.dirtyIds(useStudio.getState())).toEqual(["a"]);
+  });
+
+  it("dirtyIds returns to empty after markSaved", () => {
+    const a = ann("a", 0, 0);
+    const after = ann("a", 5, 5);
+    useStudio.getState().seedBuffer([a]);
+    useStudio.getState().applyCommand(updateCmd("a", a, after));
+    useStudio.getState().markSaved("a");
+    expect(studioSelectors.dirtyIds(useStudio.getState())).toEqual([]);
+  });
+
+  it("createdIds tracks ids absent from the original snapshot", () => {
+    useStudio.getState().seedBuffer([ann("server-1")]);
+    useStudio.getState().applyCommand(createCmd(ann("local-1")));
+    expect(studioSelectors.createdIds(useStudio.getState())).toEqual(["local-1"]);
+    expect(studioSelectors.dirtyIds(useStudio.getState())).toEqual([]);
+  });
+
+  it("deletedIds tracks ids present in original but missing from buffer", () => {
+    const a = ann("a");
+    useStudio.getState().seedBuffer([a]);
+    useStudio.getState().applyCommand(deleteCmd(a));
+    expect(studioSelectors.deletedIds(useStudio.getState())).toEqual(["a"]);
+  });
 });

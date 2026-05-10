@@ -8,13 +8,15 @@
 //
 // Slice B2 will mount keyboard shortcuts here; Slice B3 wires autosave that
 // reads the dirty entries off the buffer.
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, type ImageRecord } from "@/lib/api";
-import { useStudio } from "@/lib/studio-store";
+import { studioSelectors, useStudio } from "@/lib/studio-store";
+import { useAutosave } from "@/lib/use-autosave";
 import { useStudioShortcuts } from "@/lib/use-studio-shortcuts";
+import { ConflictDialog } from "./conflict-dialog";
 import { ToolPicker } from "./tool-picker";
 import { StudioSidebar } from "./sidebar";
 
@@ -72,6 +74,20 @@ export function StudioShell({
   // Mount the full keyboard-shortcut bundle (spec §10, all-or-nothing).
   useStudioShortcuts({ prevImageId, nextImageId, labelPickerRef });
 
+  // Autosave + conflict UI (spec §10).
+  const qc = useQueryClient();
+  const dirtyCount = useStudio((s) => studioSelectors.dirtyIds(s).length);
+  const [conflict, setConflict] = useState<number | null>(null);
+
+  useAutosave({
+    onConflict: (cv) => setConflict(cv),
+  });
+
+  function discardAndReload() {
+    setConflict(null);
+    qc.invalidateQueries({ queryKey: ["annotation-set", image.id] });
+  }
+
   return (
     <div className="grid h-[100dvh] grid-cols-[auto_1fr_320px] grid-rows-1">
       <ToolPicker />
@@ -103,6 +119,14 @@ export function StudioShell({
       ) : (
         <div className="border-l border-[var(--color-border-2)]" />
       )}
+
+      <ConflictDialog
+        open={conflict !== null}
+        currentVersion={conflict ?? 0}
+        localChanges={dirtyCount}
+        onDiscardAndReload={discardAndReload}
+        onDismiss={() => setConflict(null)}
+      />
     </div>
   );
 }

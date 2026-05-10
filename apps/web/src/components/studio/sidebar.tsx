@@ -29,6 +29,13 @@ export function StudioSidebar({
   const canRedo = useStudio(studioSelectors.canRedo);
   const applyCommand = useStudio((s) => s.applyCommand);
 
+  // Local-only counts that aren't yet persistable (POST/DELETE annotation
+  // endpoints not implemented). Surfaced in the banner so the user knows
+  // these won't survive a reload yet.
+  const draftCreates = useStudio((s) => studioSelectors.createdIds(s).length);
+  const draftDeletes = useStudio((s) => studioSelectors.deletedIds(s).length);
+  const dirty = useStudio((s) => studioSelectors.dirtyIds(s).length);
+
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
 
   return (
@@ -44,6 +51,26 @@ export function StudioSidebar({
           version <span className="font-mono">{setVersion}</span> · {annotations.length}
           {annotations.length === 1 ? " annotation" : " annotations"}
         </div>
+        {dirty > 0 && (
+          <div data-testid="dirty-banner" className="mt-2 text-xs text-[var(--color-primary)]">
+            saving {dirty} edit{dirty === 1 ? "" : "s"}…
+          </div>
+        )}
+        {(draftCreates > 0 || draftDeletes > 0) && (
+          <div data-testid="draft-banner" className="mt-2 text-xs text-[var(--color-warning)]">
+            {draftCreates > 0 && (
+              <>
+                {draftCreates} draft{draftCreates === 1 ? "" : "s"} (not saved yet)
+              </>
+            )}
+            {draftCreates > 0 && draftDeletes > 0 && " · "}
+            {draftDeletes > 0 && (
+              <>
+                {draftDeletes} pending delete{draftDeletes === 1 ? "" : "s"}
+              </>
+            )}
+          </div>
+        )}
         <div className="mt-3 flex gap-1">
           <button
             type="button"

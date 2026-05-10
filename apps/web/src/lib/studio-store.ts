@@ -31,6 +31,9 @@ export type StudioState = {
 
   /** Editable annotation buffer. Keyed by annotation id. */
   buffer: Record<string, Annotation>;
+  /** Pristine server snapshot. Used to derive dirty/created/deleted ids
+   * for autosave (Slice B3). Never mutated after seedBuffer. */
+  original: Record<string, Annotation>;
   history: Command[];
   future: Command[];
 
@@ -39,8 +42,12 @@ export type StudioState = {
   setTool(tool: Tool): void;
   selectAnnotation(id: string | null): void;
 
-  /** Replace the buffer with a fresh server snapshot. Clears history. */
+  /** Replace the buffer + original with a fresh server snapshot. Clears history. */
   seedBuffer(annotations: Annotation[]): void;
+  /** Mark an existing annotation as clean — removes it from the dirty set
+   * by overwriting `original[id]` with the current buffer entry. Called after
+   * a successful PATCH so the autosave loop doesn't re-save the same row. */
+  markSaved(id: string): void;
   /** Apply a command, push it on history, clear future. */
   applyCommand(cmd: Command): void;
   undo(): void;
@@ -55,6 +62,7 @@ const initial = {
   selectedTool: "select" as Tool,
   selectedAnnotationId: null,
   buffer: {} as Record<string, Annotation>,
+  original: {} as Record<string, Annotation>,
   history: [] as Command[],
   future: [] as Command[],
 };
@@ -100,11 +108,21 @@ export const useStudio = create<StudioState>((set) => ({
   setTool: (tool) => set({ selectedTool: tool }),
   selectAnnotation: (id) => set({ selectedAnnotationId: id }),
 
-  seedBuffer: (annotations) =>
+  seedBuffer: (annotations) => {
+    const snapshot = Object.fromEntries(annotations.map((a) => [a.id, a]));
     set({
-      buffer: Object.fromEntries(annotations.map((a) => [a.id, a])),
+      buffer: snapshot,
+      original: snapshot,
       history: [],
       future: [],
+    });
+  },
+
+  markSaved: (id) =>
+    set((s) => {
+      const current = s.buffer[id];
+      if (!current) return s;
+      return { original: { ...s.original, [id]: current } };
     }),
 
   applyCommand: (cmd) =>
@@ -145,9 +163,38 @@ export const useStudio = create<StudioState>((set) => ({
   reset: () => set(initial),
 }));
 
+/** Stable JSON for shallow content comparison. Annotation geometry is plain
+ * primitives so insertion order matches between buffer and original copies. */
+function annotationSig(a: Annotation): string {
+  return JSON.stringify([a.label_id, a.kind, a.geometry, a.human_accepted]);
+}
+
 /** Selectors — keep components subscribed to small slices of state. */
 export const studioSelectors = {
   bufferList: (s: StudioState): Annotation[] => Object.values(s.buffer),
   canUndo: (s: StudioState): boolean => s.history.length > 0,
   canRedo: (s: StudioState): boolean => s.future.length > 0,
+
+  /** IDs of existing (originally-from-server) annotations whose buffer
+   * content differs from the snapshot. These are what autosave PATCHes. */
+  dirtyIds: (s: StudioState): string[] => {
+    const out: string[] = [];
+    for (const id of Object.keys(s.buffer)) {
+      const orig = s.original[id];
+      if (!orig) continue; // brand-new (created locally) — see createdIds
+      if (annotationSig(orig) !== annotationSig(s.buffer[id])) out.push(id);
+    }
+    return out;
+  },
+
+  /** IDs of annotations that exist locally but not on the server. Until a
+   * POST /v1/annotations endpoint lands these are draft-only — surfaced to
+   * the user via a banner. */
+  createdIds: (s: StudioState): string[] =>
+    Object.keys(s.buffer).filter((id) => !s.original[id]),
+
+  /** IDs the server still has but the user has deleted locally. Until a
+   * DELETE endpoint lands these are draft-only too. */
+  deletedIds: (s: StudioState): string[] =>
+    Object.keys(s.original).filter((id) => !s.buffer[id]),
 };
