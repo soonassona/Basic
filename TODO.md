@@ -97,12 +97,12 @@ Exit criteria: *"all job types return masks for test images."*
 Exit criteria: *"annotator completes review-correct-save workflow."*
 
 - [x] Konva.js canvas at ≥70% viewport
-- [ ] Tools: select / bbox / point prompt / polygon / auto-segment *(select + bbox done; point / polygon / auto-segment pending Slice B4)*
-- [ ] Mask overlay rendered as PNG composite per label color *(deferred to B4 — requires AI worker to emit mask URLs)*
+- [ ] Tools: select / bbox / point prompt / polygon / auto-segment *(select + bbox shipped; point / polygon / auto-segment still pending — bbox demonstrates the pattern, polygon needs vertex editing UX)*
+- [ ] Mask overlay rendered as PNG composite per label color *(blocked: AI worker writes mask_storage_key but no PNG yet — depends on real ONNX backends emitting masks)*
 - [x] Command-pattern undo/redo (depth 50)
 - [x] Keyboard shortcuts: A / R / L / D / Z / Shift+Z / Esc / ←→ (all or nothing)
 - [x] Autosave debounced 2000ms, ETag/If-Match conflict resolution UI
-- [ ] Label picker, no localStorage for primary state *(no localStorage rule honored; dropdown UI pending B4)*
+- [x] Label picker, no localStorage for primary state
 
 ### Stage A — scaffold (commit c1ca83a)
 
@@ -131,20 +131,32 @@ the react-query cache. Sidebar surfaces unsaved-draft warning. 6 autosave
 tests. **56/56 vitest, exit criterion met for the typical review-correct-
 save flow.**
 
-### Slice B4 — TODO (the polish that flips remaining items to ✅)
+### Slice B4 — partially shipped
 
-1. POST /v1/annotations + DELETE /v1/annotations/:id — needed so locally
-   drawn bboxes and locally deleted rows can autosave (currently shown as
-   "drafts" in the sidebar warning banner)
-2. Add GET /v1/images/:id with presigned download URL (B3 still uses
-   list+filter and the dev MinIO public bucket)
-3. Label picker dropdown — fetch labels from a new GET /v1/labels endpoint;
-   L shortcut already focuses the placeholder button
-4. Mask overlay PNG composite per label color (only meaningful once the
-   AI worker writes mask images — currently writes mask_storage_key but no
-   image is produced by the stub backends)
-5. Point + polygon tool drawing handlers (bbox is the proven pattern)
-6. Playwright E2E: load → edit bbox → autosave → trigger 409 → resolve
+Done in commits b77c4f9 (Go API) + f6804f1 (web wiring) + 016316b (labels):
+
+- POST /v1/annotations — atomic insert + set-version bump, same If-Match
+  contract as PATCH; 6 new repo integration tests cover happy/conflict/404
+- DELETE /v1/annotations/:id — soft delete + set-version bump, same shape
+- Web autosave loop: three-batch flush (creates → updates → deletes), each
+  step threads new_version forward as If-Match for the next call
+- studio-store: replaceAnnotationId swaps local UUID for server UUID after
+  POST; forgetOriginal cleans up after DELETE
+- GET /v1/labels — org-scoped picker source
+- LabelPicker component — native <select>, color swatch, L shortcut focuses
+  it; picking a label dispatches an UpdateCommand which autosave PATCHes
+
+### Slice B5 — remaining polish
+
+1. **GET /v1/images/:id with presigned download URL** — replace the
+   list+filter shortcut + dev MinIO public bucket. Small + clean checkpoint.
+2. **Point + polygon tool drawing handlers** — bbox proves the pattern,
+   polygon needs in-place vertex editing (drag handles per vertex + double-
+   click to add/remove)
+3. **Mask overlay PNG composite** — blocked until the AI worker emits real
+   mask PNGs; today the ONNX backends return iou_predictions but no image
+4. **Playwright E2E** — load → draw bbox → autosave → trigger 409 → resolve;
+   also exercises the L shortcut + label dropdown
 
 ## Phase 5 — Active Learning
 
