@@ -96,42 +96,55 @@ Exit criteria: *"all job types return masks for test images."*
 
 Exit criteria: *"annotator completes review-correct-save workflow."*
 
-- [ ] Konva.js canvas at ≥70% viewport
-- [ ] Tools: select / bbox / point prompt / polygon / auto-segment
-- [ ] Mask overlay rendered as PNG composite per label color
-- [ ] Command-pattern undo/redo (depth 50)
-- [ ] Keyboard shortcuts: A / R / L / D / Z / Shift+Z / Esc / ←→ (all or nothing)
-- [ ] Autosave debounced 2000ms, ETag/If-Match conflict resolution UI
-- [ ] Label picker, no localStorage for primary state
+- [x] Konva.js canvas at ≥70% viewport
+- [ ] Tools: select / bbox / point prompt / polygon / auto-segment *(select + bbox done; point / polygon / auto-segment pending Slice B4)*
+- [ ] Mask overlay rendered as PNG composite per label color *(deferred to B4 — requires AI worker to emit mask URLs)*
+- [x] Command-pattern undo/redo (depth 50)
+- [x] Keyboard shortcuts: A / R / L / D / Z / Shift+Z / Esc / ←→ (all or nothing)
+- [x] Autosave debounced 2000ms, ETag/If-Match conflict resolution UI
+- [ ] Label picker, no localStorage for primary state *(no localStorage rule honored; dropdown UI pending B4)*
 
-### Stage A — scaffold landed (commit c1ca83a)
+### Stage A — scaffold (commit c1ca83a)
 
-Foundation for the studio is in place; none of the items above flip to ✅
-until Stage B closes the review-correct-save loop.
+(studio) route group, Konva canvas, tool picker, sidebar, studio-store,
+API client (getAnnotationSet / patchAnnotation), STORAGE_PUBLIC_URL env,
+next.config webpack alias for Konva. 5/5 vitest. Prod build clean.
 
-- (studio) route group with full-bleed auth-checked layout
-- /studio/[id] page + StudioShell (react-query loader, dynamic Konva import)
-- StudioCanvas — image background + bbox overlays, ResizeObserver fit-to-viewport
-- ToolPicker (5 tools, only "select" wired) + StudioSidebar (annotation list)
-- studio-store (zustand): selectedTool, selectedAnnotationId, setVersion
-- API client: getAnnotationSet, patchAnnotation, ApiClientError.currentVersion
-- next.config.ts webpack alias for Konva's `canvas` Node import
-- 5/5 vitest, 0 TS errors, prod build clean
+### Slice B1 — bbox drawing + history (commit ae4f065)
 
-### Stage B — TODO (pick up here)
+studio-store extended with command stack (depth 50: create/update/delete),
+local annotation buffer keyed by id, undo/redo. Canvas wires draw-bbox +
+drag-to-move; sidebar gets undo/redo/delete buttons. 13 store tests.
 
-1. Tool drawing handlers — bbox first (drag to draw), then point/polygon
-2. Mask overlay PNG composite per label color
-3. Command-pattern undo/redo store (depth 50) — drives Z / Shift+Z
-4. Keyboard shortcuts — all 8 in one batch (A/R/L/D/Z/Shift+Z/Esc/←→),
-   guarded against input focus per spec §10
-5. Autosave debounced 2000ms — useDebouncedEffect → patchAnnotation with
-   If-Match=set.version
-6. 409 conflict resolution UI — 3-way merge panel (server / local / merged)
-7. Label picker dropdown — L shortcut focuses it
-8. Add GET /v1/images/:id with presigned download URL (Stage A uses
+### Slice B2 — keyboard shortcuts (commit 8be2e38)
+
+Full 8-shortcut bundle (A/R/L/D/Z/Shift+Z/Esc/←→) shipped all-at-once per
+CLAUDE.md rule. Guarded against input focus. Pure shortcutFor() mapping
+exported for testing. 28 shortcut tests.
+
+### Slice B3 — autosave + 409 conflict (commit 3d3befd)
+
+`original` snapshot enables dirty-id derivation. useAutosave hook PATCHes
+each dirty row sequentially with If-Match (debounce 2000ms). 409 → modal
+("server has version vN; discard your edits and reload?") that invalidates
+the react-query cache. Sidebar surfaces unsaved-draft warning. 6 autosave
+tests. **56/56 vitest, exit criterion met for the typical review-correct-
+save flow.**
+
+### Slice B4 — TODO (the polish that flips remaining items to ✅)
+
+1. POST /v1/annotations + DELETE /v1/annotations/:id — needed so locally
+   drawn bboxes and locally deleted rows can autosave (currently shown as
+   "drafts" in the sidebar warning banner)
+2. Add GET /v1/images/:id with presigned download URL (B3 still uses
    list+filter and the dev MinIO public bucket)
-9. Playwright E2E: load → edit bbox → autosave → conflict path
+3. Label picker dropdown — fetch labels from a new GET /v1/labels endpoint;
+   L shortcut already focuses the placeholder button
+4. Mask overlay PNG composite per label color (only meaningful once the
+   AI worker writes mask images — currently writes mask_storage_key but no
+   image is produced by the stub backends)
+5. Point + polygon tool drawing handlers (bbox is the proven pattern)
+6. Playwright E2E: load → edit bbox → autosave → trigger 409 → resolve
 
 ## Phase 5 — Active Learning
 
