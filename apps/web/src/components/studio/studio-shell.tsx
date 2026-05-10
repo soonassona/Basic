@@ -1,12 +1,13 @@
 "use client";
 
-// Top-level studio client component. Holds:
-//   - the react-query loader for the annotation set,
-//   - the Konva canvas (loaded via dynamic to keep it out of SSR), and
-//   - the sidebar + tool picker rails.
+// Top-level studio client component (Phase 4 §10).
+//   - Loads the annotation set via react-query
+//   - Seeds the studio buffer once the data lands (single source of truth
+//     for the canvas + sidebar)
+//   - Hosts the canvas (dynamic ssr:false) + tool picker + sidebar
 //
-// Stage B will add: tool draw handlers, autosave (debounce 2000ms) with
-// If-Match=set.version, 409 conflict UI, undo/redo, keyboard shortcuts.
+// Slice B2 will mount keyboard shortcuts here; Slice B3 wires autosave that
+// reads the dirty entries off the buffer.
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useEffect } from "react";
@@ -31,6 +32,7 @@ const StudioCanvas = dynamic(
 export function StudioShell({ image, imageUrl }: { image: ImageRecord; imageUrl: string }) {
   const setImage = useStudio((s) => s.setImage);
   const setSetVersion = useStudio((s) => s.setSetVersion);
+  const seedBuffer = useStudio((s) => s.seedBuffer);
   const reset = useStudio((s) => s.reset);
 
   useEffect(() => {
@@ -43,9 +45,14 @@ export function StudioShell({ image, imageUrl }: { image: ImageRecord; imageUrl:
     queryFn: () => api.getAnnotationSet(image.id),
   });
 
+  // Seed the buffer + version once the server snapshot lands. Re-seeding
+  // would clobber unsaved local edits, so we tie this to the query data
+  // identity (changes only on a fresh fetch).
   useEffect(() => {
-    if (setQuery.data) setSetVersion(setQuery.data.version);
-  }, [setQuery.data, setSetVersion]);
+    if (!setQuery.data) return;
+    setSetVersion(setQuery.data.version);
+    seedBuffer(setQuery.data.annotations);
+  }, [setQuery.data, setSetVersion, seedBuffer]);
 
   return (
     <div className="grid h-[100dvh] grid-cols-[auto_1fr_320px] grid-rows-1">
@@ -62,11 +69,15 @@ export function StudioShell({ image, imageUrl }: { image: ImageRecord; imageUrl:
           </div>
         )}
         {setQuery.data && (
-          <StudioCanvas image={image} imageUrl={imageUrl} set={setQuery.data} />
+          <StudioCanvas
+            image={image}
+            imageUrl={imageUrl}
+            annotationSetId={setQuery.data.id}
+          />
         )}
       </section>
       {setQuery.data ? (
-        <StudioSidebar set={setQuery.data} />
+        <StudioSidebar setId={setQuery.data.id} setVersion={setQuery.data.version} />
       ) : (
         <div className="border-l border-[var(--color-border-2)]" />
       )}

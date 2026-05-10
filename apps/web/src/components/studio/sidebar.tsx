@@ -1,14 +1,24 @@
 "use client";
 
-// Studio right rail — annotation list + label picker placeholder.
-// Stage B wires the label dropdown (L shortcut), accept/reject buttons (A/R),
-// and inline geometry edits.
-import type { Annotation, AnnotationSet } from "@/lib/api";
-import { useStudio } from "@/lib/studio-store";
+// Studio right rail — annotation list + label picker placeholder + history
+// controls. Reads annotations from the studio buffer (the canvas's source of
+// truth), so a freshly drawn bbox shows up immediately without a server
+// roundtrip. Slice B2 wires keyboard A/R/L/D shortcuts to these same actions.
+import type { Annotation } from "@/lib/api";
+import { studioSelectors, useStudio } from "@/lib/studio-store";
 
-export function StudioSidebar({ set }: { set: AnnotationSet }) {
+export function StudioSidebar({ setId, setVersion }: { setId: string; setVersion: number }) {
+  const annotations = useStudio(studioSelectors.bufferList);
   const selectedId = useStudio((s) => s.selectedAnnotationId);
   const select = useStudio((s) => s.selectAnnotation);
+
+  const undo = useStudio((s) => s.undo);
+  const redo = useStudio((s) => s.redo);
+  const canUndo = useStudio(studioSelectors.canUndo);
+  const canRedo = useStudio(studioSelectors.canRedo);
+  const applyCommand = useStudio((s) => s.applyCommand);
+
+  const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
 
   return (
     <aside
@@ -18,20 +28,54 @@ export function StudioSidebar({ set }: { set: AnnotationSet }) {
     >
       <header className="border-b border-[var(--color-border-2)] p-3">
         <div className="text-xs uppercase text-[var(--color-muted)]">Set</div>
-        <div className="mt-1 font-mono text-xs">{set.id.slice(0, 8)}</div>
+        <div className="mt-1 font-mono text-xs">{setId.slice(0, 8)}</div>
         <div className="mt-2 text-xs text-[var(--color-muted)]">
-          version <span className="font-mono">{set.version}</span> · {set.annotations.length}
-          {set.annotations.length === 1 ? " annotation" : " annotations"}
+          version <span className="font-mono">{setVersion}</span> · {annotations.length}
+          {annotations.length === 1 ? " annotation" : " annotations"}
+        </div>
+        <div className="mt-3 flex gap-1">
+          <button
+            type="button"
+            onClick={undo}
+            disabled={!canUndo}
+            data-testid="undo-button"
+            aria-label="Undo"
+            className="flex-1 rounded-sm border border-[var(--color-border-2)] px-2 py-1 text-xs disabled:opacity-40 hover:bg-[var(--color-surface-2)]"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={redo}
+            disabled={!canRedo}
+            data-testid="redo-button"
+            aria-label="Redo"
+            className="flex-1 rounded-sm border border-[var(--color-border-2)] px-2 py-1 text-xs disabled:opacity-40 hover:bg-[var(--color-surface-2)]"
+          >
+            Redo
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (selected) applyCommand({ type: "delete", annotation: selected });
+            }}
+            disabled={!selected}
+            data-testid="delete-button"
+            aria-label="Delete selected"
+            className="flex-1 rounded-sm border border-[var(--color-border-2)] px-2 py-1 text-xs disabled:opacity-40 hover:bg-[var(--color-surface-2)]"
+          >
+            Delete
+          </button>
         </div>
       </header>
 
       <ul className="flex-1 overflow-y-auto" data-testid="annotation-list">
-        {set.annotations.length === 0 ? (
+        {annotations.length === 0 ? (
           <li className="p-4 text-sm text-[var(--color-muted)]">
-            No annotations yet — draw a box to start.
+            No annotations yet — switch to the Box tool and drag to draw.
           </li>
         ) : (
-          set.annotations.map((a) => (
+          annotations.map((a) => (
             <AnnotationRow
               key={a.id}
               annotation={a}
@@ -47,10 +91,10 @@ export function StudioSidebar({ set }: { set: AnnotationSet }) {
         <button
           type="button"
           disabled
-          aria-label="Label picker (Stage B)"
+          aria-label="Label picker (Stage B4)"
           className="mt-2 w-full rounded-sm border border-[var(--color-border-2)] px-2 py-1.5 text-left text-sm text-[var(--color-muted)]"
         >
-          {/* TODO Stage B: wire label dropdown + L shortcut */}
+          {/* TODO Slice B4: wire label dropdown + L shortcut */}
           Pick a label…
         </button>
       </footer>
