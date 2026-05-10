@@ -15,6 +15,7 @@ type ImageHandlers struct {
 	Presign  images.PresignUpload
 	Finalize images.FinalizeUpload
 	List     images.ListImages
+	Get      images.GetImage
 }
 
 type presignRequest struct {
@@ -178,6 +179,43 @@ func (h *ImageHandlers) ListImages(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, listImagesResponse{
 		Items: items, Total: out.Total, Limit: limit, Offset: offset,
+	})
+}
+
+// GetImage — GET /v1/images/:id
+//
+// Returns the image record + a freshly-minted presigned download URL the
+// studio canvas (spec §10) loads directly from R2/MinIO. TTL matches the
+// upload presign window so storage signing config has a single source.
+func (h *ImageHandlers) GetImage(c *gin.Context) {
+	caller, ok := callerFrom(c)
+	if !ok {
+		abortJSON(c, http.StatusUnauthorized, "unauthorized", "missing caller")
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		abortJSON(c, http.StatusBadRequest, "invalid_input", "id must be a uuid")
+		return
+	}
+
+	out, err := h.Get.Execute(c.Request.Context(), images.GetImageInput{
+		Caller: caller, ID: id,
+	})
+	if err != nil {
+		s, code := httpStatusFor(err)
+		abortJSON(c, s, code, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"image": toImageDTO(out.Image),
+		"download": presignDTO{
+			URL:     out.DownloadURL.URL,
+			Method:  out.DownloadURL.Method,
+			Headers: out.DownloadURL.Headers,
+			Expires: out.DownloadURL.Expires.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		},
 	})
 }
 

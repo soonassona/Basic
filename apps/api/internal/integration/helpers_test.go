@@ -143,6 +143,9 @@ type nopStorage struct{}
 func (nopStorage) PresignPut(_ context.Context, _, _ string, _ int64, _ time.Duration) (application.PresignedURL, error) {
 	return application.PresignedURL{}, nil
 }
+func (nopStorage) PresignGet(_ context.Context, key string, _ time.Duration) (application.PresignedURL, error) {
+	return application.PresignedURL{URL: "https://nop/" + key, Method: "GET"}, nil
+}
 func (nopStorage) HeadObject(_ context.Context, _ string) (application.ObjectInfo, error) {
 	return application.ObjectInfo{}, domain.ErrNotFound
 }

@@ -157,3 +157,34 @@ func (u ListImages) Execute(ctx context.Context, in ListImagesInput) (ListImages
 	}
 	return ListImagesOutput{Items: items, Total: total}, nil
 }
+
+// GetImage is the read query backing GET /v1/images/:id. Returns the
+// image record + a freshly minted presigned download URL the studio can
+// load into the canvas without proxying through the API.
+type GetImage struct {
+	Images     application.ImageRepository
+	Storage    application.ObjectStore
+	PresignTTL time.Duration
+}
+
+type GetImageInput struct {
+	Caller domain.Caller
+	ID     uuid.UUID
+}
+
+type GetImageOutput struct {
+	Image       domain.Image
+	DownloadURL application.PresignedURL
+}
+
+func (u GetImage) Execute(ctx context.Context, in GetImageInput) (GetImageOutput, error) {
+	img, err := u.Images.Get(ctx, in.ID, in.Caller.OrgID)
+	if err != nil {
+		return GetImageOutput{}, err
+	}
+	url, err := u.Storage.PresignGet(ctx, img.StorageKey, u.PresignTTL)
+	if err != nil {
+		return GetImageOutput{}, fmt.Errorf("presign download: %w", err)
+	}
+	return GetImageOutput{Image: img, DownloadURL: url}, nil
+}

@@ -91,6 +91,16 @@ export type PresignResponse = {
   };
 };
 
+export type ImageWithDownload = {
+  image: ImageRecord;
+  download: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    expires_at: string;
+  };
+};
+
 // ── Labels (Phase 4 spec §10) ────────────────────────────────────────────────
 
 export type Label = {
@@ -141,6 +151,9 @@ export const api = {
   me: () => request<Me>("/v1/me"),
   listImages: (limit = 50) =>
     request<{ items: ImageRecord[]; total: number }>(`/v1/images?limit=${limit}`),
+  /** GET /v1/images/:id — single image + a freshly-minted presigned
+   * download URL the studio canvas loads directly from R2/MinIO. */
+  getImage: (id: string) => request<ImageWithDownload>(`/v1/images/${id}`),
   presignUpload: (input: { content_type: string; byte_size: number }) =>
     request<PresignResponse>("/v1/images:presign", {
       method: "POST",

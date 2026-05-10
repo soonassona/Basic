@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,8 @@ func (s stubUsers) PrimaryMembership(context.Context, uuid.UUID) (domain.Members
 
 type stubImages struct {
 	created domain.Image
+	// gettable: optional pre-seeded record for Get(); ID + OrgID are matched.
+	gettable domain.Image
 }
 
 func (s *stubImages) Create(_ context.Context, img domain.Image) (domain.Image, error) {
@@ -56,7 +59,10 @@ func (s *stubImages) Create(_ context.Context, img domain.Image) (domain.Image, 
 func (s *stubImages) Finalize(context.Context, uuid.UUID, uuid.UUID, string, int32, int32, string) (domain.Image, error) {
 	return domain.Image{}, nil
 }
-func (s *stubImages) Get(context.Context, uuid.UUID, uuid.UUID) (domain.Image, error) {
+func (s *stubImages) Get(_ context.Context, id, orgID uuid.UUID) (domain.Image, error) {
+	if s.gettable.ID == id && s.gettable.OrgID == orgID {
+		return s.gettable, nil
+	}
 	return domain.Image{}, domain.ErrNotFound
 }
 func (s *stubImages) List(context.Context, uuid.UUID, domain.ImageStatus, int32, int32) ([]domain.Image, int64, error) {
@@ -70,6 +76,14 @@ func (stubStorage) PresignPut(_ context.Context, key, ct string, sz int64, ttl t
 		URL:     "https://r2.example/" + key,
 		Method:  "PUT",
 		Headers: map[string]string{"Content-Type": ct},
+		Expires: time.Now().Add(ttl),
+	}, nil
+}
+func (stubStorage) PresignGet(_ context.Context, key string, ttl time.Duration) (application.PresignedURL, error) {
+	return application.PresignedURL{
+		URL:     "https://r2.example/" + key + "?sig=download",
+		Method:  "GET",
+		Headers: map[string]string{},
 		Expires: time.Now().Add(ttl),
 	}, nil
 }
@@ -404,6 +418,107 @@ func TestPresign_RejectsTooLarge(t *testing.T) {
 
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("want 413, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// ── GET /v1/images/:id (Slice B5) ─────────────────────────────────────────
+
+func newGetImageReq(id string) *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/v1/images/"+id, nil)
+	r.AddCookie(&http.Cookie{Name: "better-auth.session_token", Value: "valid-token"})
+	return r
+}
+
+func TestGetImage_HappyPath_ReturnsImageAndDownload(t *testing.T) {
+	t.Parallel()
+	imgID := uuid.New()
+	imgs := &stubImages{
+		gettable: domain.Image{
+			ID: imgID, OrgID: callerOrg, Status: domain.ImageReady,
+			StorageKey: "orgs/x/images/y.png", ContentType: "image/png", ByteSize: 1234,
+			Width: 800, Height: 600,
+		},
+	}
+	router := newTestRouterWith(t, domain.RoleAnnotator, imgs, &stubJobs{}, &stubPublisher{})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, newGetImageReq(imgID.String()))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Image    map[string]any `json:"image"`
+		Download map[string]any `json:"download"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Image["id"] != imgID.String() {
+		t.Errorf("image id: got %v want %v", resp.Image["id"], imgID.String())
+	}
+	if resp.Download["method"] != "GET" {
+		t.Errorf("download method: got %v want GET", resp.Download["method"])
+	}
+	if u, _ := resp.Download["url"].(string); u == "" || !strings.Contains(u, "orgs/x/images/y.png") {
+		t.Errorf("download url should embed storage_key, got %q", u)
+	}
+	if _, has := resp.Download["expires_at"]; !has {
+		t.Errorf("expires_at missing from download payload")
+	}
+}
+
+func TestGetImage_NotFoundForUnknownID(t *testing.T) {
+	t.Parallel()
+	router := newTestRouterWith(t, domain.RoleAnnotator, &stubImages{}, &stubJobs{}, &stubPublisher{})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, newGetImageReq(uuid.New().String()))
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetImage_NotFoundCrossOrg(t *testing.T) {
+	t.Parallel()
+	imgID := uuid.New()
+	otherOrg := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	imgs := &stubImages{
+		gettable: domain.Image{ID: imgID, OrgID: otherOrg, StorageKey: "k"},
+	}
+	router := newTestRouterWith(t, domain.RoleAnnotator, imgs, &stubJobs{}, &stubPublisher{})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, newGetImageReq(imgID.String()))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("want 404 (cross-org), got %d", w.Code)
+	}
+}
+
+func TestGetImage_BadID_400(t *testing.T) {
+	t.Parallel()
+	router := newTestRouterWith(t, domain.RoleAnnotator, &stubImages{}, &stubJobs{}, &stubPublisher{})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, newGetImageReq("not-a-uuid"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", w.Code)
+	}
+}
+
+func TestGetImage_AllowsViewerRole(t *testing.T) {
+	t.Parallel()
+	imgID := uuid.New()
+	imgs := &stubImages{
+		gettable: domain.Image{ID: imgID, OrgID: callerOrg, StorageKey: "k", Status: domain.ImageReady},
+	}
+	router := newTestRouterWith(t, domain.RoleViewer, imgs, &stubJobs{}, &stubPublisher{})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, newGetImageReq(imgID.String()))
+	if w.Code != http.StatusOK {
+		t.Fatalf("viewers must be allowed to read images, got %d", w.Code)
 	}
 }
 

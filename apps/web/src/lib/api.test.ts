@@ -12,6 +12,36 @@ describe("api client", () => {
     expect(me.membership.role).toBe("owner");
   });
 
+  it("getImage returns the record + a presigned download URL", async () => {
+    server.use(
+      http.get(`${API}/v1/images/img-1`, () =>
+        HttpResponse.json({
+          image: {
+            id: "img-1",
+            org_id: "org-1",
+            status: "ready",
+            storage_key: "orgs/org-1/images/img-1.png",
+            content_type: "image/png",
+            byte_size: 1024,
+            width: 800,
+            height: 600,
+          },
+          download: {
+            url: "https://r2.example/orgs/org-1/images/img-1.png?sig=abc",
+            method: "GET",
+            headers: {},
+            expires_at: "2026-05-10T12:00:00Z",
+          },
+        }),
+      ),
+    );
+
+    const out = await api.getImage("img-1");
+    expect(out.image.id).toBe("img-1");
+    expect(out.download.method).toBe("GET");
+    expect(out.download.url).toContain("?sig=abc");
+  });
+
   it("translates server errors into ApiClientError", async () => {
     server.use(
       http.get(`${API}/v1/me`, () =>

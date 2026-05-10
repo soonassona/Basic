@@ -19,9 +19,12 @@ type SessionStore interface {
 	LookupSession(ctx context.Context, token string) (uuid.UUID, time.Time, error)
 }
 
-// ObjectStore generates time-limited, scoped upload URLs against R2.
+// ObjectStore generates time-limited, scoped URLs against R2.
 type ObjectStore interface {
 	PresignPut(ctx context.Context, key, contentType string, byteSize int64, ttl time.Duration) (PresignedURL, error)
+	// PresignGet returns a time-limited URL the client can fetch the
+	// object directly. The Method is "GET"; no upload headers are needed.
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (PresignedURL, error)
 	HeadObject(ctx context.Context, key string) (ObjectInfo, error)
 }
 

@@ -1,69 +1,66 @@
 "use client";
 
-// Client wrapper that resolves the image record and hands off to StudioShell.
-// Stage A uses the existing list endpoint + filter by id — adding a dedicated
-// GET /v1/images/:id is tracked for Stage B together with presigned download
-// URLs (the public bucket URL is dev-only).
+// Client wrapper that resolves the image record + presigned download URL
+// and hands off to StudioShell. Slice B5 swapped the list+filter shortcut
+// (and the dev-only MinIO public bucket dependency) for the dedicated
+// GET /v1/images/:id endpoint, which returns an image-scoped presigned URL.
+//
+// Prev/next sibling ids for the ←/→ shortcut still come from the images
+// list — that's a navigation concern, not a load concern.
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { api, type ImageRecord } from "@/lib/api";
-import { env } from "@/lib/env";
+import { api } from "@/lib/api";
 import { StudioShell } from "@/components/studio/studio-shell";
 
 export function StudioPage({ imageId }: { imageId: string }) {
+  // Primary load: the image + its presigned URL.
+  const imageQuery = useQuery({
+    queryKey: ["image", imageId],
+    queryFn: () => api.getImage(imageId),
+    // Presigned URLs eventually expire (15 min default); refetch a bit
+    // before that so a long studio session doesn't load a stale URL.
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Secondary load: the images list, only for ←/→ navigation. Cached
+  // aggressively because the order rarely changes during a session.
   const list = useQuery({
     queryKey: ["images"],
     queryFn: () => api.listImages(200),
-    staleTime: 30_000,
+    staleTime: 60_000,
   });
 
-  // Compute image + prev/next siblings from the list. ←/→ shortcuts navigate
-  // by index; null means "edge of list" and disables the shortcut.
-  const { image, prevImageId, nextImageId } = useMemo(() => {
+  const { prevImageId, nextImageId } = useMemo(() => {
     const items = list.data?.items ?? [];
     const idx = items.findIndex((i) => i.id === imageId);
-    if (idx < 0) {
-      return {
-        image: undefined as ImageRecord | undefined,
-        prevImageId: null as string | null,
-        nextImageId: null as string | null,
-      };
-    }
+    if (idx < 0) return { prevImageId: null, nextImageId: null };
     return {
-      image: items[idx],
       prevImageId: idx > 0 ? items[idx - 1].id : null,
       nextImageId: idx < items.length - 1 ? items[idx + 1].id : null,
     };
   }, [list.data, imageId]);
 
-  if (list.isLoading) {
+  if (imageQuery.isLoading) {
     return (
       <div className="grid h-[100dvh] place-items-center text-sm text-[var(--color-muted)]">
         Loading image…
       </div>
     );
   }
-  if (list.isError) {
+  if (imageQuery.isError || !imageQuery.data) {
     return (
       <div role="alert" className="grid h-[100dvh] place-items-center text-sm text-[var(--color-danger)]">
-        Failed to load images.
-      </div>
-    );
-  }
-  if (!image) {
-    return (
-      <div role="alert" className="grid h-[100dvh] place-items-center text-sm text-[var(--color-muted)]">
         Image not found.
       </div>
     );
   }
 
-  const imageUrl = `${env.STORAGE_PUBLIC_URL}/${image.storage_key}`;
+  const { image, download } = imageQuery.data;
   return (
     <StudioShell
       image={image}
-      imageUrl={imageUrl}
+      imageUrl={download.url}
       prevImageId={prevImageId}
       nextImageId={nextImageId}
     />

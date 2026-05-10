@@ -94,6 +94,27 @@ func (r *R2) PresignPut(ctx context.Context, key, contentType string, byteSize i
 	}, nil
 }
 
+// PresignGet returns a time-limited download URL. Used by the studio
+// (spec §10) so the canvas can fetch the image directly from R2/MinIO
+// without proxying through the API. No upload-time headers needed.
+func (r *R2) PresignGet(ctx context.Context, key string, ttl time.Duration) (application.PresignedURL, error) {
+	req, err := r.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(r.bucket),
+		Key:    aws.String(key),
+	}, func(po *s3.PresignOptions) {
+		po.Expires = ttl
+	})
+	if err != nil {
+		return application.PresignedURL{}, fmt.Errorf("presign get: %w", err)
+	}
+	return application.PresignedURL{
+		URL:     req.URL,
+		Method:  req.Method,
+		Headers: map[string]string{},
+		Expires: time.Now().Add(ttl),
+	}, nil
+}
+
 // HeadObject probes the uploaded object so FinalizeUpload can verify the
 // declared byte size matches what actually landed in storage.
 func (r *R2) HeadObject(ctx context.Context, key string) (application.ObjectInfo, error) {

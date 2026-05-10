@@ -237,6 +237,15 @@ func (fakeStorage) PresignPut(_ context.Context, key, contentType string, _ int6
 	}, nil
 }
 
+func (fakeStorage) PresignGet(_ context.Context, key string, ttl time.Duration) (application.PresignedURL, error) {
+	return application.PresignedURL{
+		URL:     "http://localhost:9000/visionloop/" + key + "?X-Amz-Signature=test-get",
+		Method:  "GET",
+		Headers: map[string]string{},
+		Expires: time.Now().Add(ttl),
+	}, nil
+}
+
 func (fakeStorage) HeadObject(_ context.Context, _ string) (application.ObjectInfo, error) {
 	return application.ObjectInfo{ByteSize: 1024, ContentType: "image/jpeg"}, nil
 }

@@ -86,6 +86,9 @@ func NewRouter(d RouterDeps) *gin.Engine {
 			Images: d.ImagesRepo, Storage: d.Storage, Audit: d.Audit,
 		},
 		List: images.ListImages{Images: d.ImagesRepo},
+		Get: images.GetImage{
+			Images: d.ImagesRepo, Storage: d.Storage, PresignTTL: d.PresignTTL,
+		},
 	}
 	me := &MeHandlers{Users: d.Users}
 
@@ -122,6 +125,7 @@ func NewRouter(d RouterDeps) *gin.Engine {
 
 		// Phase 1 limits writes to roles that can author images.
 		v1.GET("/images", imageHandlers.ListImages)
+		v1.GET("/images/:id", imageHandlers.GetImage)
 		v1.POST("/images:presign",
 			RequireRole(domain.RoleOwner, domain.RoleAdmin, domain.RoleAnnotator),
 			imageHandlers.PresignUpload)
