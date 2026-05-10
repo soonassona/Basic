@@ -4,6 +4,7 @@ package repo_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -150,3 +151,139 @@ func TestAnnotationRepo_Patch_ConcurrentWriters_OneWins(t *testing.T) {
 }
 
 func ptrBool(b bool) *bool { return &b }
+
+// ── Create + SoftDelete (Phase 4 Slice B4) ─────────────────────────────────
+
+func TestAnnotationRepo_Create_HappyPath(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, userID, _, setID, _, version := seedSetAndAnnotation(t, pool)
+
+	in := domain.AnnotationCreate{
+		AnnotationSetID: setID,
+		Kind:            domain.AnnotationBBox,
+		Geometry:        []byte(`{"x":10,"y":20,"w":100,"h":50}`),
+	}
+	ann, newVersion, err := r.Create(ctx, orgID, userID, version, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if newVersion != version+1 {
+		t.Errorf("version: got %d want %d", newVersion, version+1)
+	}
+	if ann.ID == uuid.Nil {
+		t.Error("expected a non-nil annotation id")
+	}
+	if ann.AnnotationSetID != setID {
+		t.Errorf("set id: got %v want %v", ann.AnnotationSetID, setID)
+	}
+	if ann.Kind != domain.AnnotationBBox {
+		t.Errorf("kind: got %q", ann.Kind)
+	}
+}
+
+func TestAnnotationRepo_Create_ConflictOnStaleIfMatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, userID, _, setID, _, version := seedSetAndAnnotation(t, pool)
+
+	_, _, err := r.Create(ctx, orgID, userID, version+99, domain.AnnotationCreate{
+		AnnotationSetID: setID,
+		Kind:            domain.AnnotationBBox,
+		Geometry:        []byte(`{"x":1,"y":2,"w":3,"h":4}`),
+	})
+	if err == nil || !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("expected ErrConflict, got: %v", err)
+	}
+}
+
+func TestAnnotationRepo_Create_NotFoundForMissingSet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, userID, _ := seedOrgAndUser(t, pool)
+
+	_, _, err := r.Create(ctx, orgID, userID, 1, domain.AnnotationCreate{
+		AnnotationSetID: uuid.New(), // never inserted
+		Kind:            domain.AnnotationBBox,
+		Geometry:        []byte(`{"x":0,"y":0,"w":1,"h":1}`),
+	})
+	if err == nil || !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestAnnotationRepo_SoftDelete_HappyPath(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, _, _, setID, annID, version := seedSetAndAnnotation(t, pool)
+
+	newVersion, err := r.SoftDelete(ctx, annID, orgID, version)
+	if err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	if newVersion != version+1 {
+		t.Errorf("version: got %d want %d", newVersion, version+1)
+	}
+
+	// Subsequent GetByImage should NOT return the deleted annotation.
+	_, anns, gerr := r.GetByImage(ctx, mustImageIDForSet(t, pool, setID), orgID)
+	if gerr != nil {
+		t.Fatalf("GetByImage: %v", gerr)
+	}
+	for _, a := range anns {
+		if a.ID == annID {
+			t.Errorf("deleted annotation %v still appears in GetByImage", annID)
+		}
+	}
+}
+
+func TestAnnotationRepo_SoftDelete_ConflictOnStaleIfMatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, _, _, _, annID, version := seedSetAndAnnotation(t, pool)
+
+	_, err := r.SoftDelete(ctx, annID, orgID, version+99)
+	if err == nil || !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("expected ErrConflict, got: %v", err)
+	}
+}
+
+func TestAnnotationRepo_SoftDelete_NotFoundForUnknownID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, _, _ := seedOrgAndUser(t, pool)
+
+	_, err := r.SoftDelete(ctx, uuid.New(), orgID, 1)
+	if err == nil || !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func mustImageIDForSet(t *testing.T, pool *pgxpool.Pool, setID uuid.UUID) uuid.UUID {
+	t.Helper()
+	var imgID uuid.UUID
+	err := pool.QueryRow(context.Background(),
+		`SELECT image_id FROM annotation_sets WHERE id = $1`, setID).Scan(&imgID)
+	if err != nil {
+		t.Fatalf("lookup image_id for set %v: %v", setID, err)
+	}
+	return imgID
+}

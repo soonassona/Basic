@@ -78,6 +78,12 @@ func (f *cbAnnotations) WriteAIResult(_ context.Context, in application.AIResult
 	f.lastWrite = in
 	return f.writeErr
 }
+func (f *cbAnnotations) Create(_ context.Context, _, _ uuid.UUID, _ int64, _ domain.AnnotationCreate) (domain.Annotation, int64, error) {
+	return domain.Annotation{}, 0, nil
+}
+func (f *cbAnnotations) SoftDelete(_ context.Context, _, _ uuid.UUID, _ int64) (int64, error) {
+	return 0, nil
+}
 
 // ── helpers ────────────────────────────────────────────────────────────
 

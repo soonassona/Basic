@@ -63,3 +63,30 @@ type AnnotationPatch struct {
 func (p AnnotationPatch) HasChanges() bool {
 	return p.Geometry != nil || p.LabelID != nil || p.HumanAccepted != nil
 }
+
+// AnnotationCreate is the input for POST /v1/annotations. The parent
+// annotation_set is implied by AnnotationSetID; the caller must supply a
+// valid If-Match against that set's current version (spec §10).
+type AnnotationCreate struct {
+	AnnotationSetID uuid.UUID
+	Kind            AnnotationKind
+	Geometry        []byte     // raw JSON, never nil
+	LabelID         *uuid.UUID // nil = unlabeled
+}
+
+// Validate enforces the minimum invariants the use-case can check before
+// hitting the database.
+func (c AnnotationCreate) Validate() error {
+	if c.AnnotationSetID == uuid.Nil {
+		return ErrInvalidInput
+	}
+	if len(c.Geometry) == 0 {
+		return ErrInvalidInput
+	}
+	switch c.Kind {
+	case AnnotationBBox, AnnotationPolygon, AnnotationMask, AnnotationPoint:
+		return nil
+	default:
+		return ErrInvalidInput
+	}
+}

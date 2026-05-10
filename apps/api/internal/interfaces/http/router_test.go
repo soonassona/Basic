@@ -182,6 +182,43 @@ func (s *stubAnnotations) WriteAIResult(_ context.Context, _ application.AIResul
 	return nil
 }
 
+func (s *stubAnnotations) Create(_ context.Context, orgID, _ uuid.UUID, ifMatch int64, in domain.AnnotationCreate) (domain.Annotation, int64, error) {
+	if s.notFound {
+		return domain.Annotation{}, 0, domain.ErrNotFound
+	}
+	if s.row.OrgID != uuid.Nil && s.row.OrgID != orgID {
+		return domain.Annotation{}, 0, domain.ErrNotFound
+	}
+	if s.version != ifMatch {
+		return domain.Annotation{}, s.version, domain.ErrConflict
+	}
+	s.version++
+	created := domain.Annotation{
+		ID:              uuid.New(),
+		OrgID:           orgID,
+		AnnotationSetID: in.AnnotationSetID,
+		LabelID:         in.LabelID,
+		Kind:            in.Kind,
+		Geometry:        in.Geometry,
+	}
+	s.row = created
+	return created, s.version, nil
+}
+
+func (s *stubAnnotations) SoftDelete(_ context.Context, _, orgID uuid.UUID, ifMatch int64) (int64, error) {
+	if s.notFound {
+		return 0, domain.ErrNotFound
+	}
+	if s.row.OrgID != uuid.Nil && s.row.OrgID != orgID {
+		return 0, domain.ErrNotFound
+	}
+	if s.version != ifMatch {
+		return s.version, domain.ErrConflict
+	}
+	s.version++
+	return s.version, nil
+}
+
 // stubPublisher records publishes; failWith makes Publish return an error.
 type stubPublisher struct {
 	calls   int

@@ -101,6 +101,8 @@ func NewRouter(d RouterDeps) *gin.Engine {
 
 	annHandlers := &AnnotationHandlers{
 		Patch:  annotations.PatchAnnotation{Annotations: d.AnnotationsRepo, Audit: d.Audit},
+		Create: annotations.CreateAnnotation{Annotations: d.AnnotationsRepo, Audit: d.Audit},
+		Delete: annotations.DeleteAnnotation{Annotations: d.AnnotationsRepo, Audit: d.Audit},
 		GetSet: annotations.GetAnnotationSet{Sets: d.AnnotationSetsRepo},
 	}
 
@@ -128,10 +130,17 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		v1.GET("/jobs/:id", jobHandlers.GetJob)
 		v1.GET("/jobs/:id/events", jobHandlers.JobEvents)
 
-		// Optimistic-locked annotation edits (spec §10).
+		// Optimistic-locked annotation edits (spec §10). Create / patch /
+		// delete all share the same If-Match → 409 contract; viewers blocked.
+		v1.POST("/annotations",
+			RequireRole(domain.RoleOwner, domain.RoleAdmin, domain.RoleAnnotator),
+			annHandlers.CreateAnnotation)
 		v1.PATCH("/annotations/:id",
 			RequireRole(domain.RoleOwner, domain.RoleAdmin, domain.RoleAnnotator),
 			annHandlers.PatchAnnotation)
+		v1.DELETE("/annotations/:id",
+			RequireRole(domain.RoleOwner, domain.RoleAdmin, domain.RoleAnnotator),
+			annHandlers.DeleteAnnotation)
 		v1.GET("/annotation-sets/:image_id", annHandlers.GetAnnotationSet)
 	}
 

@@ -7,6 +7,14 @@ SELECT id, org_id, image_id, version, notes, created_by, created_at, updated_at
 FROM annotation_sets
 WHERE image_id = $1 AND org_id = $2;
 
+-- name: GetAnnotationSetByID :one
+-- Read by primary key. Used by CreateAnnotation to distinguish "set not
+-- found in this org" (404) from "stale If-Match" (409) on a no-rows
+-- bump-version response.
+SELECT id, org_id, image_id, version, notes, created_by, created_at, updated_at
+FROM annotation_sets
+WHERE id = $1 AND org_id = $2;
+
 -- name: ListAnnotationsBySet :many
 SELECT id, org_id, annotation_set_id, label_id, kind, geometry,
        mask_storage_key, ai_score, quality_score, model_used,
@@ -44,6 +52,29 @@ WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 RETURNING id, org_id, annotation_set_id, label_id, kind, geometry,
           mask_storage_key, ai_score, quality_score, model_used,
           human_accepted, created_by, created_at, updated_at;
+
+-- name: CreateAnnotation :one
+-- Inserts a new annotation. Caller is responsible for bumping the parent
+-- annotation_set's version inside the same transaction (mirrors
+-- ApplyAnnotationPatch's locking flow). Returns the inserted row.
+INSERT INTO annotations (
+    org_id, annotation_set_id, label_id, kind, geometry, created_by
+) VALUES (
+    $1, $2, $3, $4, $5::jsonb, $6
+)
+RETURNING id, org_id, annotation_set_id, label_id, kind, geometry,
+          mask_storage_key, ai_score, quality_score, model_used,
+          human_accepted, created_by, created_at, updated_at;
+
+-- name: SoftDeleteAnnotation :one
+-- Marks an annotation deleted via deleted_at timestamp. Returns the
+-- annotation_set_id so the use-case can audit which set was affected
+-- without a separate read.
+UPDATE annotations
+SET deleted_at = now(),
+    updated_at = now()
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+RETURNING annotation_set_id;
 
 -- name: WriteAIResult :exec
 -- Writes AI inference fields onto un-reviewed annotations in a set.

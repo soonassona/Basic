@@ -31,6 +31,10 @@ type Querier interface {
 	// Returns the new version on success, or no rows on If-Match mismatch.
 	BumpAnnotationSetVersion(ctx context.Context, arg BumpAnnotationSetVersionParams) (int64, error)
 	CountImages(ctx context.Context, arg CountImagesParams) (int64, error)
+	// Inserts a new annotation. Caller is responsible for bumping the parent
+	// annotation_set's version inside the same transaction (mirrors
+	// ApplyAnnotationPatch's locking flow). Returns the inserted row.
+	CreateAnnotation(ctx context.Context, arg CreateAnnotationParams) (CreateAnnotationRow, error)
 	// All image queries are tenant-scoped: org_id is the first parameter and
 	// appears in WHERE on every read/write. See ADR-0002.
 	CreateImage(ctx context.Context, arg CreateImageParams) (Image, error)
@@ -46,6 +50,10 @@ type Querier interface {
 	DeleteMembership(ctx context.Context, arg DeleteMembershipParams) error
 	FinalizeImage(ctx context.Context, arg FinalizeImageParams) (Image, error)
 	FindActiveJobByDedupKey(ctx context.Context, arg FindActiveJobByDedupKeyParams) (Job, error)
+	// Read by primary key. Used by CreateAnnotation to distinguish "set not
+	// found in this org" (404) from "stale If-Match" (409) on a no-rows
+	// bump-version response.
+	GetAnnotationSetByID(ctx context.Context, arg GetAnnotationSetByIDParams) (AnnotationSet, error)
 	// Annotation queries. Optimistic locking lives on annotation_sets.version
 	// (spec §10). PatchAnnotation runs inside a tx with these three queries
 	// so the version check + bump + row update are atomic.
@@ -70,11 +78,16 @@ type Querier interface {
 	ListMembershipsForUser(ctx context.Context, userID uuid.UUID) ([]ListMembershipsForUserRow, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
 	MarkJobErrored(ctx context.Context, arg MarkJobErroredParams) error
+	// Marks an annotation deleted via deleted_at timestamp. Returns the
+	// annotation_set_id so the use-case can audit which set was affected
+	// without a separate read.
+	SoftDeleteAnnotation(ctx context.Context, arg SoftDeleteAnnotationParams) (uuid.UUID, error)
 	SoftDeleteImage(ctx context.Context, arg SoftDeleteImageParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	UpdateMembershipRole(ctx context.Context, arg UpdateMembershipRoleParams) (Membership, error)
-	// Writes AI inference fields onto every annotation in a set.
-	// Called by the job callback handler when state = succeeded.
+	// Writes AI inference fields onto un-reviewed annotations in a set.
+	// Skips rows where human_accepted IS NOT NULL so human corrections are
+	// never overwritten by a later AI inference pass.
 	WriteAIResult(ctx context.Context, arg WriteAIResultParams) error
 }
 

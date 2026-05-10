@@ -127,6 +127,15 @@ type AnnotationSetRepository interface {
 //     `currentVersion` is the new (post-bump) value.
 type AnnotationRepository interface {
 	Patch(ctx context.Context, id, orgID uuid.UUID, ifMatch int64, patch domain.AnnotationPatch) (ann domain.Annotation, currentVersion int64, err error)
+	// Create inserts a new annotation, atomically bumping the parent
+	// annotation_set version. Same conflict semantics as Patch: ErrConflict
+	// when the supplied ifMatch is stale; the returned currentVersion is
+	// the value the client should reload from. createdBy is the user id.
+	Create(ctx context.Context, orgID, createdBy uuid.UUID, ifMatch int64, in domain.AnnotationCreate) (ann domain.Annotation, currentVersion int64, err error)
+	// SoftDelete marks an annotation deleted (deleted_at = now) and bumps
+	// the parent set version. Returns the new version on success, or
+	// ErrConflict (with the actual current version) on an If-Match mismatch.
+	SoftDelete(ctx context.Context, id, orgID uuid.UUID, ifMatch int64) (currentVersion int64, err error)
 	WriteAIResult(ctx context.Context, in AIResultWrite) error
 }
 

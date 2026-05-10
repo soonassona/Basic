@@ -102,6 +102,105 @@ func (q *Queries) BumpAnnotationSetVersion(ctx context.Context, arg BumpAnnotati
 	return version, err
 }
 
+const createAnnotation = `-- name: CreateAnnotation :one
+INSERT INTO annotations (
+    org_id, annotation_set_id, label_id, kind, geometry, created_by
+) VALUES (
+    $1, $2, $3, $4, $5::jsonb, $6
+)
+RETURNING id, org_id, annotation_set_id, label_id, kind, geometry,
+          mask_storage_key, ai_score, quality_score, model_used,
+          human_accepted, created_by, created_at, updated_at
+`
+
+type CreateAnnotationParams struct {
+	OrgID           uuid.UUID
+	AnnotationSetID uuid.UUID
+	LabelID         pgtype.UUID
+	Kind            AnnotationKind
+	Column5         []byte
+	CreatedBy       uuid.UUID
+}
+
+type CreateAnnotationRow struct {
+	ID              uuid.UUID
+	OrgID           uuid.UUID
+	AnnotationSetID uuid.UUID
+	LabelID         pgtype.UUID
+	Kind            AnnotationKind
+	Geometry        []byte
+	MaskStorageKey  *string
+	AiScore         *float64
+	QualityScore    *float64
+	ModelUsed       *string
+	HumanAccepted   *bool
+	CreatedBy       uuid.UUID
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Inserts a new annotation. Caller is responsible for bumping the parent
+// annotation_set's version inside the same transaction (mirrors
+// ApplyAnnotationPatch's locking flow). Returns the inserted row.
+func (q *Queries) CreateAnnotation(ctx context.Context, arg CreateAnnotationParams) (CreateAnnotationRow, error) {
+	row := q.db.QueryRow(ctx, createAnnotation,
+		arg.OrgID,
+		arg.AnnotationSetID,
+		arg.LabelID,
+		arg.Kind,
+		arg.Column5,
+		arg.CreatedBy,
+	)
+	var i CreateAnnotationRow
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.AnnotationSetID,
+		&i.LabelID,
+		&i.Kind,
+		&i.Geometry,
+		&i.MaskStorageKey,
+		&i.AiScore,
+		&i.QualityScore,
+		&i.ModelUsed,
+		&i.HumanAccepted,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAnnotationSetByID = `-- name: GetAnnotationSetByID :one
+SELECT id, org_id, image_id, version, notes, created_by, created_at, updated_at
+FROM annotation_sets
+WHERE id = $1 AND org_id = $2
+`
+
+type GetAnnotationSetByIDParams struct {
+	ID    uuid.UUID
+	OrgID uuid.UUID
+}
+
+// Read by primary key. Used by CreateAnnotation to distinguish "set not
+// found in this org" (404) from "stale If-Match" (409) on a no-rows
+// bump-version response.
+func (q *Queries) GetAnnotationSetByID(ctx context.Context, arg GetAnnotationSetByIDParams) (AnnotationSet, error) {
+	row := q.db.QueryRow(ctx, getAnnotationSetByID, arg.ID, arg.OrgID)
+	var i AnnotationSet
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ImageID,
+		&i.Version,
+		&i.Notes,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAnnotationSetByImage = `-- name: GetAnnotationSetByImage :one
 
 SELECT id, org_id, image_id, version, notes, created_by, created_at, updated_at
@@ -253,6 +352,29 @@ func (q *Queries) ListAnnotationsBySet(ctx context.Context, arg ListAnnotationsB
 		return nil, err
 	}
 	return items, nil
+}
+
+const softDeleteAnnotation = `-- name: SoftDeleteAnnotation :one
+UPDATE annotations
+SET deleted_at = now(),
+    updated_at = now()
+WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
+RETURNING annotation_set_id
+`
+
+type SoftDeleteAnnotationParams struct {
+	ID    uuid.UUID
+	OrgID uuid.UUID
+}
+
+// Marks an annotation deleted via deleted_at timestamp. Returns the
+// annotation_set_id so the use-case can audit which set was affected
+// without a separate read.
+func (q *Queries) SoftDeleteAnnotation(ctx context.Context, arg SoftDeleteAnnotationParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, softDeleteAnnotation, arg.ID, arg.OrgID)
+	var annotation_set_id uuid.UUID
+	err := row.Scan(&annotation_set_id)
+	return annotation_set_id, err
 }
 
 const writeAIResult = `-- name: WriteAIResult :exec
