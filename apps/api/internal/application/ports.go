@@ -111,10 +111,17 @@ type JobEvent struct {
 	UpdatedAt time.Time
 }
 
-// AnnotationSetRepository reads the per-image annotation set + its
-// annotations. Used by GET /v1/annotation-sets/:image_id.
+// AnnotationSetRepository reads + provisions the per-image annotation set
+// + its annotations. Used by GET /v1/annotation-sets/:image_id and by
+// FinalizeUpload (which provisions the empty set when an image becomes
+// ready, so the studio always has a parent to PATCH against).
 type AnnotationSetRepository interface {
 	GetByImage(ctx context.Context, imageID, orgID uuid.UUID) (domain.AnnotationSet, []domain.Annotation, error)
+	// EnsureForImage idempotently inserts an annotation_set for (orgID,
+	// imageID). Returns the existing row if one already exists. Safe to
+	// call repeatedly — the underlying UNIQUE (org_id, image_id) makes
+	// this a read-or-create.
+	EnsureForImage(ctx context.Context, orgID, imageID, createdBy uuid.UUID) (domain.AnnotationSet, error)
 }
 
 // AnnotationRepository persists annotations with optimistic locking

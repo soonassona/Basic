@@ -167,6 +167,13 @@ func (s *stubAnnotations) GetByImage(_ context.Context, imageID, orgID uuid.UUID
 	return s.set, s.setItems, nil
 }
 
+func (s *stubAnnotations) EnsureForImage(_ context.Context, orgID, imageID, _ uuid.UUID) (domain.AnnotationSet, error) {
+	if s.set.ID != uuid.Nil {
+		return s.set, nil
+	}
+	return domain.AnnotationSet{ID: uuid.New(), OrgID: orgID, ImageID: imageID, Version: 1}, nil
+}
+
 func (s *stubAnnotations) Patch(_ context.Context, id, orgID uuid.UUID, ifMatch int64, patch domain.AnnotationPatch) (domain.Annotation, int64, error) {
 	if s.notFound {
 		return domain.Annotation{}, 0, domain.ErrNotFound

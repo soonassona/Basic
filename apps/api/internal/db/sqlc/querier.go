@@ -48,6 +48,11 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteMembership(ctx context.Context, arg DeleteMembershipParams) error
+	// Idempotent insert. ON CONFLICT (org_id, image_id) DO UPDATE bumps
+	// updated_at to a no-op so RETURNING always yields a row — that lets
+	// callers fetch the canonical id without a separate read. Called by
+	// FinalizeUpload so every ready image has a set ready for the studio.
+	EnsureAnnotationSet(ctx context.Context, arg EnsureAnnotationSetParams) (AnnotationSet, error)
 	FinalizeImage(ctx context.Context, arg FinalizeImageParams) (Image, error)
 	FindActiveJobByDedupKey(ctx context.Context, arg FindActiveJobByDedupKeyParams) (Job, error)
 	// Read by primary key. Used by CreateAnnotation to distinguish "set not

@@ -171,6 +171,39 @@ func (q *Queries) CreateAnnotation(ctx context.Context, arg CreateAnnotationPara
 	return i, err
 }
 
+const ensureAnnotationSet = `-- name: EnsureAnnotationSet :one
+INSERT INTO annotation_sets (org_id, image_id, created_by)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, image_id) DO UPDATE SET updated_at = annotation_sets.updated_at
+RETURNING id, org_id, image_id, version, notes, created_by, created_at, updated_at
+`
+
+type EnsureAnnotationSetParams struct {
+	OrgID     uuid.UUID
+	ImageID   uuid.UUID
+	CreatedBy uuid.UUID
+}
+
+// Idempotent insert. ON CONFLICT (org_id, image_id) DO UPDATE bumps
+// updated_at to a no-op so RETURNING always yields a row — that lets
+// callers fetch the canonical id without a separate read. Called by
+// FinalizeUpload so every ready image has a set ready for the studio.
+func (q *Queries) EnsureAnnotationSet(ctx context.Context, arg EnsureAnnotationSetParams) (AnnotationSet, error) {
+	row := q.db.QueryRow(ctx, ensureAnnotationSet, arg.OrgID, arg.ImageID, arg.CreatedBy)
+	var i AnnotationSet
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ImageID,
+		&i.Version,
+		&i.Notes,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAnnotationSetByID = `-- name: GetAnnotationSetByID :one
 SELECT id, org_id, image_id, version, notes, created_by, created_at, updated_at
 FROM annotation_sets

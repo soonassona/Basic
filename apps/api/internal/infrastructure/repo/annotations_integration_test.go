@@ -277,6 +277,83 @@ func TestAnnotationRepo_SoftDelete_NotFoundForUnknownID(t *testing.T) {
 	}
 }
 
+// ── EnsureForImage (Slice B6) ──────────────────────────────────────────────
+
+func TestAnnotationRepo_EnsureForImage_Inserts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, userID, imgID := seedOrgAndUser(t, pool)
+
+	set, err := r.EnsureForImage(ctx, orgID, imgID, userID)
+	if err != nil {
+		t.Fatalf("EnsureForImage: %v", err)
+	}
+	if set.ID == uuid.Nil {
+		t.Fatal("expected a non-nil set id")
+	}
+	if set.ImageID != imgID {
+		t.Errorf("image_id: got %v want %v", set.ImageID, imgID)
+	}
+	if set.Version != 1 {
+		t.Errorf("version: got %d want 1 (default)", set.Version)
+	}
+}
+
+func TestAnnotationRepo_EnsureForImage_IsIdempotent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgID, userID, imgID := seedOrgAndUser(t, pool)
+
+	first, err := r.EnsureForImage(ctx, orgID, imgID, userID)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	second, err := r.EnsureForImage(ctx, orgID, imgID, userID)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Errorf("expected the same set id on repeated calls, got %v vs %v", first.ID, second.ID)
+	}
+	if second.Version != first.Version {
+		t.Errorf("repeated ensure must NOT bump version, got %d vs %d", second.Version, first.Version)
+	}
+}
+
+func TestAnnotationRepo_EnsureForImage_TenantScoped(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	pool := startPostgres(ctx, t)
+	r := repo.NewAnnotationRepo(pool)
+	orgA, userA, imgA := seedOrgAndUser(t, pool)
+	orgB, userB, _ := seedOrgAndUser(t, pool)
+	// Same image_id won't actually be reused across orgs (each seedOrgAndUser
+	// creates a fresh image), so we just verify the org_id round-trips.
+	setA, err := r.EnsureForImage(ctx, orgA, imgA, userA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if setA.OrgID != orgA {
+		t.Errorf("set org_id: got %v want %v", setA.OrgID, orgA)
+	}
+	// Re-ensuring under a different org with a fresh image_id makes a fresh row.
+	_, _, imgB := seedOrgAndUser(t, pool)
+	setB, err := r.EnsureForImage(ctx, orgB, imgB, userB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if setB.ID == setA.ID {
+		t.Error("different orgs/images must produce distinct sets")
+	}
+}
+
 func mustImageIDForSet(t *testing.T, pool *pgxpool.Pool, setID uuid.UUID) uuid.UUID {
 	t.Helper()
 	var imgID uuid.UUID

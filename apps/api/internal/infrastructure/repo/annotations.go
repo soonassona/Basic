@@ -323,6 +323,35 @@ func (r *AnnotationRepo) SoftDelete(
 	return bumped, nil
 }
 
+// EnsureForImage idempotently inserts an annotation_set for the image.
+// The UNIQUE (org_id, image_id) constraint + ON CONFLICT in the SQL keep
+// this safe to call multiple times (e.g. on retry after a partial finalize).
+func (r *AnnotationRepo) EnsureForImage(
+	ctx context.Context,
+	orgID, imageID, createdBy uuid.UUID,
+) (domain.AnnotationSet, error) {
+	q := sqlc.New(r.pool)
+	row, err := q.EnsureAnnotationSet(ctx, sqlc.EnsureAnnotationSetParams{
+		OrgID: orgID, ImageID: imageID, CreatedBy: createdBy,
+	})
+	if err != nil {
+		return domain.AnnotationSet{}, fmt.Errorf("ensure annotation_set: %w", err)
+	}
+	out := domain.AnnotationSet{
+		ID:        row.ID,
+		OrgID:     row.OrgID,
+		ImageID:   row.ImageID,
+		Version:   row.Version,
+		CreatedBy: row.CreatedBy,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
+	if row.Notes != nil {
+		out.Notes = *row.Notes
+	}
+	return out, nil
+}
+
 // WriteAIResult writes mask_storage_key, ai_score, and model_used onto
 // every annotation in the set. Called by the job callback handler when
 // state = succeeded (spec §5).

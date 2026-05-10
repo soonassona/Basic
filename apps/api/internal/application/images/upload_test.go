@@ -219,6 +219,104 @@ func TestFinalizeUpload_HappyPath(t *testing.T) {
 	}
 }
 
+// ── FinalizeUpload + EnsureForImage side effect (Slice B6) ────────────────
+
+type fakeAnnotationSets struct {
+	called  bool
+	gotOrg  uuid.UUID
+	gotImg  uuid.UUID
+	gotUser uuid.UUID
+	err     error
+}
+
+func (f *fakeAnnotationSets) GetByImage(_ context.Context, _, _ uuid.UUID) (domain.AnnotationSet, []domain.Annotation, error) {
+	return domain.AnnotationSet{}, nil, domain.ErrNotFound
+}
+func (f *fakeAnnotationSets) EnsureForImage(_ context.Context, orgID, imgID, userID uuid.UUID) (domain.AnnotationSet, error) {
+	f.called = true
+	f.gotOrg = orgID
+	f.gotImg = imgID
+	f.gotUser = userID
+	if f.err != nil {
+		return domain.AnnotationSet{}, f.err
+	}
+	return domain.AnnotationSet{ID: uuid.New(), OrgID: orgID, ImageID: imgID, Version: 1}, nil
+}
+
+func TestFinalizeUpload_ProvisionsAnnotationSet(t *testing.T) {
+	repo := newFakeRepo()
+	store := &fakeStorage{objects: map[string]application.ObjectInfo{}}
+	audit := &fakeAudit{}
+	sets := &fakeAnnotationSets{}
+
+	pre := images.PresignUpload{
+		Images: repo, Storage: store, Audit: audit,
+		PresignTTL: time.Minute, Clock: application.SystemClock{},
+	}
+	out, _ := pre.Execute(context.Background(), images.PresignUploadInput{
+		Caller: caller(), ContentType: "image/png", ByteSize: 50,
+	})
+	store.objects[out.Image.StorageKey] = application.ObjectInfo{
+		ContentType: "image/png", ByteSize: 50, ETag: "x",
+	}
+
+	fin := images.FinalizeUpload{
+		Images: repo, Storage: store, Audit: audit, AnnotationSets: sets,
+	}
+	final, err := fin.Execute(context.Background(), images.FinalizeUploadInput{
+		Caller: caller(), ImageID: out.Image.ID, Width: 10, Height: 10, SHA256: "abc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sets.called {
+		t.Fatal("expected EnsureForImage to be called")
+	}
+	if sets.gotImg != final.ID {
+		t.Errorf("image_id passed: got %v want %v", sets.gotImg, final.ID)
+	}
+	if sets.gotOrg != caller().OrgID {
+		t.Errorf("org_id passed: got %v want %v", sets.gotOrg, caller().OrgID)
+	}
+}
+
+func TestFinalizeUpload_AnnotationSetFailureDoesNotFailUpload(t *testing.T) {
+	repo := newFakeRepo()
+	store := &fakeStorage{objects: map[string]application.ObjectInfo{}}
+	audit := &fakeAudit{}
+	sets := &fakeAnnotationSets{err: errors.New("db down")}
+
+	pre := images.PresignUpload{
+		Images: repo, Storage: store, Audit: audit,
+		PresignTTL: time.Minute, Clock: application.SystemClock{},
+	}
+	out, _ := pre.Execute(context.Background(), images.PresignUploadInput{
+		Caller: caller(), ContentType: "image/png", ByteSize: 50,
+	})
+	store.objects[out.Image.StorageKey] = application.ObjectInfo{
+		ContentType: "image/png", ByteSize: 50, ETag: "x",
+	}
+
+	fin := images.FinalizeUpload{
+		Images: repo, Storage: store, Audit: audit, AnnotationSets: sets,
+	}
+	final, err := fin.Execute(context.Background(), images.FinalizeUploadInput{
+		Caller: caller(), ImageID: out.Image.ID, Width: 10, Height: 10, SHA256: "abc",
+	})
+	if err != nil {
+		t.Fatalf("set failure must NOT fail upload, got: %v", err)
+	}
+	if final.Status != domain.ImageReady {
+		t.Errorf("image must still be ready, got %q", final.Status)
+	}
+	// Audit metadata should reflect the failed provisioning so ops can spot it.
+	last := audit.entries[len(audit.entries)-1]
+	if last.Metadata["annotation_set_provisioned"] != false {
+		t.Errorf("audit must record provisioned=false on failure, got %v",
+			last.Metadata["annotation_set_provisioned"])
+	}
+}
+
 // ── GetImage (Slice B5) ────────────────────────────────────────────────────
 
 func TestGetImage_HappyPath_ReturnsImageAndPresignedURL(t *testing.T) {

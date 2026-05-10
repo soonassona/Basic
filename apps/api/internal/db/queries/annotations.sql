@@ -15,6 +15,16 @@ SELECT id, org_id, image_id, version, notes, created_by, created_at, updated_at
 FROM annotation_sets
 WHERE id = $1 AND org_id = $2;
 
+-- name: EnsureAnnotationSet :one
+-- Idempotent insert. ON CONFLICT (org_id, image_id) DO UPDATE bumps
+-- updated_at to a no-op so RETURNING always yields a row — that lets
+-- callers fetch the canonical id without a separate read. Called by
+-- FinalizeUpload so every ready image has a set ready for the studio.
+INSERT INTO annotation_sets (org_id, image_id, created_by)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, image_id) DO UPDATE SET updated_at = annotation_sets.updated_at
+RETURNING id, org_id, image_id, version, notes, created_by, created_at, updated_at;
+
 -- name: ListAnnotationsBySet :many
 SELECT id, org_id, annotation_set_id, label_id, kind, geometry,
        mask_storage_key, ai_score, quality_score, model_used,

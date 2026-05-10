@@ -63,6 +63,9 @@ func (f *cbAnnotationSets) GetByImage(_ context.Context, imageID, orgID uuid.UUI
 	}
 	return f.set, nil, nil
 }
+func (f *cbAnnotationSets) EnsureForImage(_ context.Context, _, _, _ uuid.UUID) (domain.AnnotationSet, error) {
+	return f.set, nil
+}
 
 type cbAnnotations struct {
 	writeCalled bool

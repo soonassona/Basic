@@ -77,11 +77,15 @@ func (u PresignUpload) Execute(ctx context.Context, in PresignUploadInput) (Pres
 
 // FinalizeUpload reconciles a successful client upload with the database.
 // It re-reads the object from storage to confirm presence and size, then
-// flips the row to `ready`.
+// flips the row to `ready`. As a side effect (so the studio always has a
+// parent set to PATCH against) we also EnsureForImage on the
+// AnnotationSetRepository — best-effort: an error here is logged via the
+// returned image's metadata audit but does NOT fail the upload.
 type FinalizeUpload struct {
-	Images  application.ImageRepository
-	Storage application.ObjectStore
-	Audit   application.AuditRecorder
+	Images         application.ImageRepository
+	Storage        application.ObjectStore
+	Audit          application.AuditRecorder
+	AnnotationSets application.AnnotationSetRepository
 }
 
 type FinalizeUploadInput struct {
@@ -115,6 +119,17 @@ func (u FinalizeUpload) Execute(ctx context.Context, in FinalizeUploadInput) (do
 		return domain.Image{}, err
 	}
 
+	// Provision the annotation_set so the studio can PATCH against it
+	// without a separate setup call. Best-effort by design: a failure here
+	// surfaces through metadata so ops can spot it, but the image still
+	// counts as ready (the user can re-trigger via a no-op PATCH later).
+	annotationSetProvisioned := true
+	if u.AnnotationSets != nil {
+		if _, err := u.AnnotationSets.EnsureForImage(ctx, in.Caller.OrgID, final.ID, in.Caller.UserID); err != nil {
+			annotationSetProvisioned = false
+		}
+	}
+
 	_ = u.Audit.Record(ctx, application.AuditEntry{
 		OrgID:      &in.Caller.OrgID,
 		ActorID:    &in.Caller.UserID,
@@ -123,8 +138,9 @@ func (u FinalizeUpload) Execute(ctx context.Context, in FinalizeUploadInput) (do
 		Resource:   "image",
 		ResourceID: &final.ID,
 		Metadata: map[string]any{
-			"width":  in.Width,
-			"height": in.Height,
+			"width":                       in.Width,
+			"height":                      in.Height,
+			"annotation_set_provisioned":  annotationSetProvisioned,
 		},
 	})
 	return final, nil

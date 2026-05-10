@@ -84,6 +84,7 @@ func NewRouter(d RouterDeps) *gin.Engine {
 		},
 		Finalize: images.FinalizeUpload{
 			Images: d.ImagesRepo, Storage: d.Storage, Audit: d.Audit,
+			AnnotationSets: d.AnnotationSetsRepo,
 		},
 		List: images.ListImages{Images: d.ImagesRepo},
 		Get: images.GetImage{
