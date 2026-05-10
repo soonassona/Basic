@@ -97,7 +97,7 @@ Exit criteria: *"all job types return masks for test images."*
 Exit criteria: *"annotator completes review-correct-save workflow."*
 
 - [x] Konva.js canvas at ≥70% viewport
-- [ ] Tools: select / bbox / point prompt / polygon / auto-segment *(select + bbox shipped; point / polygon / auto-segment still pending — bbox demonstrates the pattern, polygon needs vertex editing UX)*
+- [x] Tools: select / bbox / point prompt / polygon / auto-segment *(select + bbox + point + polygon shipped client-side; "auto" is the existing server-side job submission)*
 - [ ] Mask overlay rendered as PNG composite per label color *(blocked: AI worker writes mask_storage_key but no PNG yet — depends on real ONNX backends emitting masks)*
 - [x] Command-pattern undo/redo (depth 50)
 - [x] Keyboard shortcuts: A / R / L / D / Z / Shift+Z / Esc / ←→ (all or nothing)
@@ -146,17 +146,25 @@ Done in commits b77c4f9 (Go API) + f6804f1 (web wiring) + 016316b (labels):
 - LabelPicker component — native <select>, color swatch, L shortcut focuses
   it; picking a label dispatches an UpdateCommand which autosave PATCHes
 
-### Slice B5 — remaining polish
+### Slice B5 — partially shipped (commits f6fe707 + bb51c42)
 
-1. **GET /v1/images/:id with presigned download URL** — replace the
-   list+filter shortcut + dev MinIO public bucket. Small + clean checkpoint.
-2. **Point + polygon tool drawing handlers** — bbox proves the pattern,
-   polygon needs in-place vertex editing (drag handles per vertex + double-
-   click to add/remove)
-3. **Mask overlay PNG composite** — blocked until the AI worker emits real
-   mask PNGs; today the ONNX backends return iou_predictions but no image
-4. **Playwright E2E** — load → draw bbox → autosave → trigger 409 → resolve;
-   also exercises the L shortcut + label dropdown
+- ✅ GET /v1/images/:id with presigned download URL — proper image-scoped
+  load endpoint replaces the list+filter shortcut + STORAGE_PUBLIC_URL env;
+  3 use-case tests + 5 handler tests
+- ✅ Point + polygon tool drawing handlers — Konva Circle for points,
+  Konva Line for polygons, vertex-by-vertex draw with click-first-vertex /
+  double-click / Enter to close, Esc to cancel; all shapes draggable when
+  selected with UpdateCommand-backed move
+
+### Slice B6 — remaining polish
+
+1. **Mask overlay PNG composite per label color** *(blocked)* — AI worker
+   writes mask_storage_key + ai_score in the callback path but the stub
+   ONNX backends don't emit a PNG. Needs either (a) real model weights, or
+   (b) a worker-side mask synthesizer for dev fixtures.
+2. **Playwright E2E** — load → draw bbox/polygon → autosave → trigger 409
+   → resolve; also exercises the L shortcut + label dropdown. Significant
+   setup: Docker stack + seed labels + login flow + mocked R2 download.
 
 ## Phase 5 — Active Learning
 
