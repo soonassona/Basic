@@ -48,6 +48,13 @@ export type StudioState = {
    * by overwriting `original[id]` with the current buffer entry. Called after
    * a successful PATCH so the autosave loop doesn't re-save the same row. */
   markSaved(id: string): void;
+  /** Swap a local-only annotation id for the server-assigned id and seed
+   * the original snapshot with the server's row. Called after a successful
+   * POST so subsequent edits PATCH against the real id. */
+  replaceAnnotationId(localId: string, serverAnnotation: Annotation): void;
+  /** Drop an id from the original snapshot — used after a successful DELETE
+   * so the row stops appearing in deletedIds. */
+  forgetOriginal(id: string): void;
   /** Apply a command, push it on history, clear future. */
   applyCommand(cmd: Command): void;
   undo(): void;
@@ -123,6 +130,29 @@ export const useStudio = create<StudioState>((set) => ({
       const current = s.buffer[id];
       if (!current) return s;
       return { original: { ...s.original, [id]: current } };
+    }),
+
+  replaceAnnotationId: (localId, serverAnnotation) =>
+    set((s) => {
+      if (!s.buffer[localId]) return s;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [localId]: _gone, ...restBuf } = s.buffer;
+      const newBuf = { ...restBuf, [serverAnnotation.id]: serverAnnotation };
+      const newOrig = { ...s.original, [serverAnnotation.id]: serverAnnotation };
+      return {
+        buffer: newBuf,
+        original: newOrig,
+        selectedAnnotationId:
+          s.selectedAnnotationId === localId ? serverAnnotation.id : s.selectedAnnotationId,
+      };
+    }),
+
+  forgetOriginal: (id) =>
+    set((s) => {
+      if (!s.original[id]) return s;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [id]: _gone, ...rest } = s.original;
+      return { original: rest };
     }),
 
   applyCommand: (cmd) =>

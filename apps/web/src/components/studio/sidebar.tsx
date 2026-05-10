@@ -57,10 +57,10 @@ export function StudioSidebar({
           </div>
         )}
         {(draftCreates > 0 || draftDeletes > 0) && (
-          <div data-testid="draft-banner" className="mt-2 text-xs text-[var(--color-warning)]">
+          <div data-testid="draft-banner" className="mt-2 text-xs text-[var(--color-primary)]">
             {draftCreates > 0 && (
               <>
-                {draftCreates} draft{draftCreates === 1 ? "" : "s"} (not saved yet)
+                {draftCreates} new · saving…
               </>
             )}
             {draftCreates > 0 && draftDeletes > 0 && " · "}

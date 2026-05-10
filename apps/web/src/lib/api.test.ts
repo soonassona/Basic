@@ -91,6 +91,55 @@ describe("annotation client (Phase 4 spec §10)", () => {
     expect(out.annotation.human_accepted).toBe(true);
   });
 
+  it("createAnnotation POSTs with If-Match and returns new_version", async () => {
+    let capturedIfMatch: string | null = null;
+    let capturedBody: unknown = null;
+    server.use(
+      http.post(`${API}/v1/annotations`, async ({ request }) => {
+        capturedIfMatch = request.headers.get("If-Match");
+        capturedBody = await request.json();
+        return HttpResponse.json(
+          {
+            annotation: {
+              id: "00000000-0000-0000-0000-000000000ccc",
+              annotation_set_id: "set-1",
+              label_id: null,
+              kind: "bbox",
+              geometry: { x: 1, y: 2, w: 3, h: 4 },
+              human_accepted: null,
+            },
+            new_version: 8,
+          },
+          { status: 201 },
+        );
+      }),
+    );
+
+    const out = await api.createAnnotation(7, {
+      annotation_set_id: "set-1",
+      kind: "bbox",
+      geometry: { x: 1, y: 2, w: 3, h: 4 },
+    });
+    expect(capturedIfMatch).toBe("7");
+    expect(capturedBody).toMatchObject({ annotation_set_id: "set-1", kind: "bbox" });
+    expect(out.new_version).toBe(8);
+    expect(out.annotation.id).toBe("00000000-0000-0000-0000-000000000ccc");
+  });
+
+  it("deleteAnnotation sends DELETE with If-Match and returns new_version", async () => {
+    let capturedIfMatch: string | null = null;
+    server.use(
+      http.delete(`${API}/v1/annotations/${annId}`, ({ request }) => {
+        capturedIfMatch = request.headers.get("If-Match");
+        return HttpResponse.json({ new_version: 9 });
+      }),
+    );
+
+    const out = await api.deleteAnnotation(annId, 8);
+    expect(capturedIfMatch).toBe("8");
+    expect(out.new_version).toBe(9);
+  });
+
   it("patchAnnotation 409 conflict surfaces current_version on the error", async () => {
     server.use(
       http.patch(`${API}/v1/annotations/${annId}`, () =>

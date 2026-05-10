@@ -198,3 +198,39 @@ describe("studio-store: selectors", () => {
     expect(studioSelectors.deletedIds(useStudio.getState())).toEqual(["a"]);
   });
 });
+
+describe("studio-store: replaceAnnotationId / forgetOriginal", () => {
+  it("replaceAnnotationId swaps local id for server id, seeds original", () => {
+    const local = ann("local-1", 1, 2);
+    useStudio.getState().applyCommand(createCmd(local));
+    expect(studioSelectors.createdIds(useStudio.getState())).toEqual(["local-1"]);
+
+    const server = { ...local, id: "server-1" };
+    useStudio.getState().replaceAnnotationId("local-1", server);
+
+    const s = useStudio.getState();
+    expect(s.buffer["local-1"]).toBeUndefined();
+    expect(s.buffer["server-1"]).toMatchObject({ geometry: { x: 1, y: 2, w: 10, h: 10 } });
+    // After replacement the row is no longer "created" (it's saved to server).
+    expect(studioSelectors.createdIds(s)).toEqual([]);
+    expect(studioSelectors.dirtyIds(s)).toEqual([]);
+  });
+
+  it("replaceAnnotationId updates the selected id when it was the local one", () => {
+    const local = ann("local-2");
+    useStudio.getState().applyCommand(createCmd(local));
+    useStudio.getState().selectAnnotation("local-2");
+    useStudio.getState().replaceAnnotationId("local-2", { ...local, id: "server-2" });
+    expect(useStudio.getState().selectedAnnotationId).toBe("server-2");
+  });
+
+  it("forgetOriginal drops the id from the snapshot so deletedIds stops listing it", () => {
+    const a = ann("a");
+    useStudio.getState().seedBuffer([a]);
+    useStudio.getState().applyCommand(deleteCmd(a));
+    expect(studioSelectors.deletedIds(useStudio.getState())).toEqual(["a"]);
+
+    useStudio.getState().forgetOriginal("a");
+    expect(studioSelectors.deletedIds(useStudio.getState())).toEqual([]);
+  });
+});

@@ -1,16 +1,17 @@
 // Autosave for the annotation studio (Phase 4 spec §10).
 //
-// Debounces 2000ms after the last edit, then PATCHes every dirty annotation
-// with If-Match=setVersion. On 200 the row is marked saved + setVersion is
-// bumped. On 409 we surface the conflict so the shell can render the
-// resolution UI (Slice B3 minimal: "discard + reload").
-//
-// Creates and deletes are NOT autosaved here — POST /v1/annotations and
-// DELETE /v1/annotations/:id don't exist yet (tracked as Stage B follow-up).
-// The sidebar shows a "draft" banner when these exist so the user knows.
+// Debounces 2000ms after the last edit, then walks three batches in order:
+//   1. POST every locally-created annotation (createdIds)
+//   2. PATCH every dirty existing annotation (dirtyIds)
+//   3. DELETE every locally-deleted annotation (deletedIds)
+// Each verb bumps the parent set's version, so the chain threads the
+// returned new_version forward as If-Match for the next request. On 200/201
+// the row is reconciled with the server (replaceAnnotationId / markSaved /
+// forgetOriginal). On 409 the conflict callback fires and the loop stops
+// to avoid version drift.
 import { useEffect, useRef } from "react";
 
-import { ApiClientError, api, type AnnotationPatch } from "./api";
+import { ApiClientError, api, type Annotation, type AnnotationKind, type AnnotationPatch } from "./api";
 import { studioSelectors, useStudio, type StudioState } from "./studio-store";
 
 /** Debounce window for autosave (spec §10). */
@@ -56,55 +57,93 @@ export function useAutosave({ onConflict, onError }: UseAutosaveOptions): {
   flush: () => Promise<void>;
 } {
   const dirtyIds = useStudio(studioSelectors.dirtyIds);
+  const createdIds = useStudio(studioSelectors.createdIds);
+  const deletedIds = useStudio(studioSelectors.deletedIds);
   const setVersion = useStudio((s) => s.setVersion);
   const setSetVersion = useStudio((s) => s.setSetVersion);
   const markSaved = useStudio((s) => s.markSaved);
+  const replaceAnnotationId = useStudio((s) => s.replaceAnnotationId);
+  const forgetOriginal = useStudio((s) => s.forgetOriginal);
 
-  // Refs so the debounce timer reads the latest values without retriggering.
-  const dirtyRef = useRef(dirtyIds);
-  const versionRef = useRef(setVersion);
   const inFlight = useRef(false);
-  dirtyRef.current = dirtyIds;
-  versionRef.current = setVersion;
-
   const onConflictRef = useRef(onConflict);
   const onErrorRef = useRef(onError);
   onConflictRef.current = onConflict;
   onErrorRef.current = onError;
 
+  // Aggregate signal that triggers the debounced flush — re-running the
+  // effect on either dirty / created / deleted change keeps the debounce
+  // window tied to the latest edit regardless of which kind it was.
+  const pendingCount = dirtyIds.length + createdIds.length + deletedIds.length;
+
+  function handleErr(err: unknown, id: string): "conflict" | "error" {
+    if (err instanceof ApiClientError && err.status === 409) {
+      const cv = err.currentVersion;
+      if (typeof cv === "number") onConflictRef.current(cv);
+      else onErrorRef.current?.(err, id);
+      return "conflict";
+    }
+    onErrorRef.current?.(err, id);
+    return "error";
+  }
+
   async function flush() {
     if (inFlight.current) return;
-    const ids = dirtyRef.current;
-    const version = versionRef.current;
-    if (ids.length === 0 || version == null) return;
+    const version = setVersion;
+    if (version == null) return;
 
     inFlight.current = true;
     try {
       const s = useStudio.getState();
-      // Sequential to keep version monotonic — each successful PATCH bumps
-      // the version which the next PATCH must use as If-Match.
       let v = version;
-      for (const id of ids) {
-        const patch = diffPatch(s.buffer, s.original, id);
+
+      // 1. Creates first — they assign permanent ids, which subsequent
+      //    patches in the same batch may target.
+      for (const localId of studioSelectors.createdIds(s)) {
+        const localAnn = s.buffer[localId];
+        if (!localAnn) continue;
+        try {
+          const out = await api.createAnnotation(v, {
+            annotation_set_id: localAnn.annotation_set_id,
+            kind: localAnn.kind as AnnotationKind,
+            geometry: localAnn.geometry,
+            label_id: localAnn.label_id,
+          });
+          v = out.new_version;
+          replaceAnnotationId(localId, out.annotation as Annotation);
+        } catch (err) {
+          if (handleErr(err, localId) !== "error") return;
+          return;
+        }
+      }
+
+      // 2. Updates against existing rows.
+      const liveState = useStudio.getState();
+      for (const id of studioSelectors.dirtyIds(liveState)) {
+        const patch = diffPatch(liveState.buffer, liveState.original, id);
         if (!patch) continue;
         try {
           const out = await api.patchAnnotation(id, v, patch);
           v = out.new_version;
           markSaved(id);
         } catch (err) {
-          if (err instanceof ApiClientError && err.status === 409) {
-            const cv = err.currentVersion;
-            if (typeof cv === "number") {
-              onConflictRef.current(cv);
-            } else {
-              onErrorRef.current?.(err, id);
-            }
-            return; // stop the batch on conflict
-          }
-          onErrorRef.current?.(err, id);
-          return; // stop on first error to avoid version drift
+          if (handleErr(err, id) !== "error") return;
+          return;
         }
       }
+
+      // 3. Deletes.
+      for (const id of studioSelectors.deletedIds(liveState)) {
+        try {
+          const out = await api.deleteAnnotation(id, v);
+          v = out.new_version;
+          forgetOriginal(id);
+        } catch (err) {
+          if (handleErr(err, id) !== "error") return;
+          return;
+        }
+      }
+
       setSetVersion(v);
     } finally {
       inFlight.current = false;
@@ -112,11 +151,11 @@ export function useAutosave({ onConflict, onError }: UseAutosaveOptions): {
   }
 
   useEffect(() => {
-    if (dirtyIds.length === 0) return;
+    if (pendingCount === 0) return;
     const timer = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirtyIds.length, setVersion]);
+  }, [pendingCount, setVersion]);
 
   return { flush };
 }

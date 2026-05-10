@@ -120,6 +120,13 @@ export type AnnotationPatch = {
   human_accepted?: boolean | null;
 };
 
+export type AnnotationCreatePayload = {
+  annotation_set_id: string;
+  kind: AnnotationKind;
+  geometry: unknown;
+  label_id?: string | null;
+};
+
 export const api = {
   me: () => request<Me>("/v1/me"),
   listImages: (limit = 50) =>
@@ -151,4 +158,23 @@ export const api = {
         body: JSON.stringify(patch),
       },
     ),
+
+  /** POST /v1/annotations — same If-Match contract as PATCH (creating a
+   * row also bumps the parent set's version). */
+  createAnnotation: (ifMatch: number, body: AnnotationCreatePayload) =>
+    request<{ annotation: Annotation; new_version: number }>(
+      `/v1/annotations`,
+      {
+        method: "POST",
+        headers: { "If-Match": String(ifMatch) },
+        body: JSON.stringify(body),
+      },
+    ),
+
+  /** DELETE /v1/annotations/:id — soft delete; bumps the set version. */
+  deleteAnnotation: (id: string, ifMatch: number) =>
+    request<{ new_version: number }>(`/v1/annotations/${id}`, {
+      method: "DELETE",
+      headers: { "If-Match": String(ifMatch) },
+    }),
 };
