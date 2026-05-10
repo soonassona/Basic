@@ -156,15 +156,24 @@ Done in commits b77c4f9 (Go API) + f6804f1 (web wiring) + 016316b (labels):
   double-click / Enter to close, Esc to cancel; all shapes draggable when
   selected with UpdateCommand-backed move
 
-### Slice B6 — remaining polish
+### Slice B6 — partially shipped (commit e799708)
+
+Unblocker landed: **FinalizeUpload now provisions the annotation_set**
+(idempotent EnsureForImage). Until this commit, GET /v1/annotation-sets/:id
+returned 404 for any freshly uploaded image, so the studio couldn't open
+without a job submission first. Now upload → studio just works.
+
+### Slice B7 — remaining polish
 
 1. **Mask overlay PNG composite per label color** *(blocked)* — AI worker
    writes mask_storage_key + ai_score in the callback path but the stub
    ONNX backends don't emit a PNG. Needs either (a) real model weights, or
    (b) a worker-side mask synthesizer for dev fixtures.
 2. **Playwright E2E** — load → draw bbox/polygon → autosave → trigger 409
-   → resolve; also exercises the L shortcut + label dropdown. Significant
-   setup: Docker stack + seed labels + login flow + mocked R2 download.
+   → resolve; also exercises the L shortcut + label dropdown. The
+   annotation_set unblocker (B6) means only login + upload + interactive
+   canvas drawing remain to wire; Konva canvas needs coordinate-based
+   clicks since shapes render to a single <canvas> not addressable DOM.
 
 ## Phase 5 — Active Learning
 
